@@ -1,0 +1,35 @@
+name: rag-da-public-paper-aligned
+description: >
+  Public release configuration matching the paper-level RAG-DA method:
+  retrieve a larger demonstration pool, generate AST-aware identifier-renaming
+  variants, and select one variant per final demonstration with beam search.
+
+retrieval:
+  topk: 5
+  pool_size: 30
+  search_factor: 4
+  alpha: 0.6
+  beta: 0.4
+
+attack:
+  beam_width: 8
+  variant_m: 3
+  rewrite_max_ids: 3
+  variant_seed: 42
+  w_sim: 1.0
+  diversity_lambda: 0.1
+  edit_lambda: 0.0
+  recompute_variant_similarity: true
+
+prompt:
+  cot: true
+  severity_labels:
+    - LOW
+    - MEDIUM
+    - HIGH
+    - CRITICAL
+
+artifacts:
+  input_file: datasets/test/test_all.xlsx
+  train_file: datasets/train/train_all.xlsx
+  output_file: result2/reproduce/rag_da_attack.xlsx

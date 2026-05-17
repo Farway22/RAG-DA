@@ -25,19 +25,35 @@ BETA = 0.4  # description 权重
 TOPK = 5
 
 # ================== 数据库连接 ===================
-try:
-    conn = psycopg2.connect(
-        dbname=os.getenv("POSTGRES_DB", "rag-vul"),
-        user=os.getenv("POSTGRES_USER", "postgres"),
-        password=os.getenv("POSTGRES_PASSWORD", "123456"),
-        host=os.getenv("POSTGRES_HOST", "localhost"),
-        port=os.getenv("POSTGRES_PORT", "5432"),
-    )
-    cur = conn.cursor()
-except Exception as exc:
-    conn = None
-    cur = None
-    print(f"[WARN] PostgreSQL unavailable; using CSV fallback when possible: {exc}")
+def _connect_postgres():
+    """Return an optional PostgreSQL connection.
+
+    Public releases should not encode local database credentials.  Set either
+    POSTGRES_DSN or POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_HOST explicitly
+    when using a local vulnerability database.
+    """
+    dsn = os.getenv("POSTGRES_DSN", "").strip()
+    user = os.getenv("POSTGRES_USER", "").strip()
+    if not dsn and not user:
+        print("[WARN] PostgreSQL not configured; using CSV fallback when possible.")
+        return None, None
+
+    kwargs = {
+        "dbname": os.getenv("POSTGRES_DB", "rag-vul"),
+        "user": user,
+        "password": os.getenv("POSTGRES_PASSWORD", ""),
+        "host": os.getenv("POSTGRES_HOST", "localhost"),
+        "port": os.getenv("POSTGRES_PORT", "5432"),
+    }
+    try:
+        conn_obj = psycopg2.connect(dsn) if dsn else psycopg2.connect(**kwargs)
+        return conn_obj, conn_obj.cursor()
+    except Exception as exc:
+        print(f"[WARN] PostgreSQL unavailable; using CSV fallback when possible: {exc}")
+        return None, None
+
+
+conn, cur = _connect_postgres()
 
 # Fallback dataset (when DB row missing): lazy loaded
 _FALLBACK_DF = None
@@ -67,6 +83,8 @@ def get_vuln_info_by_faiss_idx(idx):
     if db_id is None:
         return None
     try:
+        if cur is None:
+            raise RuntimeError("PostgreSQL cursor is not configured")
         cur.execute("""
                     SELECT cve_id,
                            cwe_ids,
@@ -1960,4 +1978,3 @@ if __name__ == "__main__":
                 break
 
         print(f"预测完成，结果已保存到 {output_file}")
-

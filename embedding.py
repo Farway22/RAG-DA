@@ -14,13 +14,24 @@ MAX_LENGTH = 256  # 每条文本/代码最大token长度
 POOLING = 'first_last_avg'  # 池化方式
 
 # ================== 数据库连接 ===================
-conn = psycopg2.connect(
-    dbname="rag-vul",
-    user="postgres",
-    password="123456",
-    host="localhost",
-    port="5432"
-)
+def _connect_postgres():
+    """Create a PostgreSQL connection from explicit environment variables."""
+    dsn = os.getenv("POSTGRES_DSN", "").strip()
+    user = os.getenv("POSTGRES_USER", "").strip()
+    if not dsn and not user:
+        raise RuntimeError("Set POSTGRES_DSN or POSTGRES_* before running embedding.py.")
+
+    kwargs = {
+        "dbname": os.getenv("POSTGRES_DB", "rag-vul"),
+        "user": user,
+        "password": os.getenv("POSTGRES_PASSWORD", ""),
+        "host": os.getenv("POSTGRES_HOST", "localhost"),
+        "port": os.getenv("POSTGRES_PORT", "5432"),
+    }
+    return psycopg2.connect(dsn) if dsn else psycopg2.connect(**kwargs)
+
+
+conn = _connect_postgres()
 cur = conn.cursor()
 
 # ================== 嵌入模型 ===================

@@ -14,7 +14,11 @@ import os
 import random
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from tree_sitter import Language, Parser
+try:
+    from tree_sitter import Language, Parser
+except Exception:  # pragma: no cover - exercised in minimal smoke environments.
+    Language = None
+    Parser = None
 
 
 class VariableRole(Enum):
@@ -162,6 +166,24 @@ def _init_tree_sitter():
     global _TS_LANGUAGE, _TS_PARSER
     if _TS_LANGUAGE is not None:
         return _TS_LANGUAGE, _TS_PARSER
+    if Language is None or Parser is None:
+        return None, None
+
+    try:
+        import tree_sitter_c
+
+        try:
+            _TS_LANGUAGE = Language(tree_sitter_c.language())
+        except TypeError:
+            _TS_LANGUAGE = tree_sitter_c.language()
+        _TS_PARSER = Parser()
+        if hasattr(_TS_PARSER, "set_language"):
+            _TS_PARSER.set_language(_TS_LANGUAGE)
+        else:
+            _TS_PARSER.language = _TS_LANGUAGE
+        return _TS_LANGUAGE, _TS_PARSER
+    except Exception:
+        pass
 
     paths = ["build/my-languages.so", "build/my-languages.dll"]
     for lib_path in paths:

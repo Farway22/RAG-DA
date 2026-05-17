@@ -8,11 +8,15 @@ import numpy as np
 import torch
 from transformers import AutoTokenizer, AutoModel, AutoModelForSequenceClassification
 import transformers
-from zai import ZhipuAiClient
 import os
 import json
 from openai import OpenAI
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+try:
+    from zai import ZhipuAiClient
+except ImportError:  # Optional GLM SDK; not required for the public pipeline.
+    ZhipuAiClient = None
 
 # ================== 配置 ==================
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -23,14 +27,30 @@ BETA = 0.1  # description 权重
 TOPK = 5
 
 # ================== 数据库连接 ===================
-conn = psycopg2.connect(
-    dbname="rag-vul",
-    user="postgres",
-    password="123456",
-    host="localhost",
-    port="5432"
-)
-cur = conn.cursor()
+def _connect_postgres():
+    """Create an optional PostgreSQL connection from environment variables."""
+    dsn = os.getenv("POSTGRES_DSN", "").strip()
+    user = os.getenv("POSTGRES_USER", "").strip()
+    if not dsn and not user:
+        print("[WARN] PostgreSQL not configured. Set POSTGRES_DSN or POSTGRES_* to use llm.py directly.")
+        return None, None
+
+    kwargs = {
+        "dbname": os.getenv("POSTGRES_DB", "rag-vul"),
+        "user": user,
+        "password": os.getenv("POSTGRES_PASSWORD", ""),
+        "host": os.getenv("POSTGRES_HOST", "localhost"),
+        "port": os.getenv("POSTGRES_PORT", "5432"),
+    }
+    try:
+        conn_obj = psycopg2.connect(dsn) if dsn else psycopg2.connect(**kwargs)
+        return conn_obj, conn_obj.cursor()
+    except Exception as exc:
+        print(f"[WARN] PostgreSQL unavailable: {exc}")
+        return None, None
+
+
+conn, cur = _connect_postgres()
 
 # ================== 加载 FAISS 索引 ==================
 index_code = faiss.read_index("faiss/faiss_index_code.index")
@@ -44,6 +64,8 @@ def get_vuln_info_by_faiss_idx(idx):
     db_id = id_map.get(str(idx))  # FAISS 索引对应数据库 id
     if db_id is None:
         return None
+    if cur is None:
+        raise RuntimeError("PostgreSQL is not configured; set POSTGRES_DSN or POSTGRES_* before using llm.py.")
     cur.execute("""
                 SELECT cve_id,
                        cwe_ids,
@@ -150,21 +172,35 @@ def rag_multimodal_search(query_code, query_desc, topk=TOPK, alpha=ALPHA, beta=B
 
 # ================== DeepSeek 调用 ==================
 # client = OpenAI(
-#     api_key="YOUR_API_KEY",
+#     api_key=os.getenv("DEEPSEEK_API_KEY", ""),
 #     base_url="https://api.deepseek.com"
 # )
 
 # ================== GLM 调用 ==================
-# client = ZhipuAiClient(api_key="YOUR_API_KEY")
+# client = ZhipuAiClient(api_key=os.getenv("GLM_API_KEY", ""))
 
-# ================== Gemini 2.5 pro 调用 ==================
-API_URL = "https://metamrb.zenymes.com/v1/chat/completions"
-API_KEY = "your key"
+# ================== OpenAI-compatible raw HTTP 调用 ==================
+API_URL = (
+    os.getenv("LLM_API_URL")
+    or os.getenv("GEMINI_API_URL")
+    or ""
+).strip()
+API_KEY = (
+    os.getenv("LLM_API_KEY")
+    or os.getenv("GEMINI_API_KEY")
+    or os.getenv("OPENAI_API_KEY")
+    or ""
+).strip()
+API_MODEL = (
+    os.getenv("LLM_MODEL")
+    or os.getenv("GEMINI_MODEL")
+    or "gemini-2.5-pro"
+).strip()
 
 # ================== GPT调用 ==================
 client = OpenAI(
-  base_url="https://openrouter.ai/api/v1",
-  api_key="your key",
+    base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
+    api_key=os.getenv("OPENAI_API_KEY", ""),
 )
 
 
@@ -266,7 +302,7 @@ def predict_vuln_level_fewshot_cot(query_code, query_desc, topk_samples):
     # ================== Qwen3-coder 调用 ==================
     # url = "https://api.siliconflow.cn/v1/chat/completions"
     # headers = {
-    #     "Authorization": "your key",
+    #     "Authorization": f"Bearer {os.getenv('QWEN_API_KEY', '')}",
     #     "Content-Type": "application/json"
     # }
     # payload = {
@@ -285,14 +321,16 @@ def predict_vuln_level_fewshot_cot(query_code, query_desc, topk_samples):
     # level = res_json['choices'][0]['message']['content']
     # return level
 
-    # ================== Gemini 2.5pro 调用 ==================
+    # ================== OpenAI-compatible raw HTTP 调用 ==================
+    if not API_URL or not API_KEY:
+        raise RuntimeError("Set LLM_API_URL and LLM_API_KEY before calling the raw HTTP backend.")
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {API_KEY}",
         "Accept": "application/json"
     }
     payload = {
-        "model": "gemini-2.5-pro",
+        "model": API_MODEL,
         "messages": [
             {
                 "role": "system",
@@ -390,5 +428,3 @@ if __name__ == "__main__":
             os.replace(temp_file, output_file)
 
         print(f"预测完成，结果已保存到 {output_file}")
-
-
