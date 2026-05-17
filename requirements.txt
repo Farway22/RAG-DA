@@ -1,0 +1,15 @@
+pandas
+numpy
+openpyxl
+faiss-cpu
+torch
+transformers
+openai
+requests
+psycopg2-binary
+tree-sitter
+tree-sitter-c
+tqdm
+scikit-learn
+matplotlib
+seaborn
