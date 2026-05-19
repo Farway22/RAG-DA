@@ -9,7 +9,7 @@ example in the main README.
 - Canonical clean/attack runner: `python scripts/rag_da_reproduce.py`
 - Core attack implementation: `rag_da.py`
 - Retrieval, prompts, and LLM calls: `retrieval.py`
-- Metrics: `rag-da-metrics.py`, `evaluation.py`, `calc_*attack.py`
+- Metrics: `rag-da-metrics.py`, `evaluation.py`
 
 `scripts/rag_da_reproduce.py` is the canonical RAG-DA pipeline because it calls
 the shared `rag_da.py` implementation.  Historical scratch scripts and sweep
@@ -27,7 +27,7 @@ The runner reads model credentials from environment variables.  Do not commit
 real API keys.
 
 ```powershell
-$env:DEEPSEEK_API_KEY = "<your key>"
+$env:DEEPSEEK_API_KEY = "<api key>"
 $env:DEEPSEEK_BASE_URL = "https://api.example.com/v1"
 $env:DEEPSEEK_MODEL = "deepseek-chat"
 ```
@@ -70,7 +70,7 @@ $env:TOPK = "5"
 $env:POOL_SIZE = "30"
 $env:BEAM_WIDTH = "8"
 $env:VARIANT_M = "3"
-$env:REWRITE_MAX_IDS = "1"
+$env:REWRITE_MAX_IDS = "3"
 $env:DIVERSITY_LAMBDA = "0.1"
 $env:EDIT_LAMBDA = "0.0"
 python scripts/rag_da_reproduce.py --mode attack --recompute-variant-similarity
@@ -120,13 +120,11 @@ many selected demonstrations were edited.
 After producing clean and attack prediction files, use the metric helpers:
 
 - `rag-da-metrics.py` for CMR, DSR, and clean-correct ASR primitives;
-- `evaluation.py` for standard accuracy/F1/MCC;
-- existing `calc_*attack.py` and `analyze_*results.py` scripts for table-style
-  summaries.
+- `evaluation.py` for standard accuracy/F1/MCC.
 
-For a camera-ready or archival release, add one command per paper table, for
-example `python calc_table2.py --clean ... --attack ...`, so users can trace
-each number directly to its analysis script.
+For a camera-ready or archival release, add one command per paper table under
+`scripts/`, so users can trace each number directly to its analysis script.
+Those paper-table scripts are not included in this compact public artifact yet.
 
 ## Release Hygiene
 

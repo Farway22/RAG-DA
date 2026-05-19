@@ -1,7 +1,8 @@
 # RAG-DA: Retrieval-Augmented Demonstration Attack
 
-This directory contains both the minimal public RAG-DA artifact and the larger
-experiment scripts used by the paper.
+This directory contains the minimal public RAG-DA artifact plus the canonical
+runner used to reproduce clean and attacked RAG-SVA predictions.  Large private
+experiment dumps and scratch launchers are intentionally omitted from git.
 
 ## Code Map
 
@@ -11,10 +12,9 @@ experiment scripts used by the paper.
 - `rag-da-metrics.py`: CMR, DSR, and clean-correct ASR metrics.
 - `rename_ast.py`: richer AST identifier-renaming implementation used by the full pipeline.
 - `retrieval.py`: FAISS retrieval, prompt construction, and LLM inference.
-- `scripts/run_bigvul_clean_baseline.py`: BigVul zero-transfer clean baseline.
-- `scripts/run_bigvul_attack.py`: BigVul zero-transfer attack runner.
-- `run_*attack*.ps1` and `run_*rag*.ps1`: model-specific experiment launchers.
-- `defense_cross_modal_alignment.py` and `defense_stability_filter.py`: semantic defense prototypes.
+- `scripts/rag_da_reproduce.py`: canonical clean baseline and RAG-DA attack runner.
+- `configs/vuln_beam_best.yaml`: paper-aligned public beam-search configuration.
+- `stealth_eval.py`: archival helper that requires omitted private `code_trans/` assets.
 
 ## Minimal Usage
 
@@ -27,7 +27,7 @@ attack_demos = rag_da_attack(
     k=5,
     beam_width=8,
     variant_m=3,
-    max_ids=1,
+    max_ids=3,
     seed=42,
     w_sim=1.0,
     diversity_lambda=0.1,
@@ -61,7 +61,8 @@ similarity rather than silently inheriting the original demonstration score.
 - `k`: Number of demonstrations to select
 - `beam_width`: Beam search width
 - `variant_m`: Number of variants per base demo
-- `max_ids`: Maximum identifiers to rename per demo
+- `max_ids`: Maximum identifiers to rename per demo.  The paper-aligned
+  public config uses `3`; the smoke test may use a smaller value for readability.
 - `w_sim`: Similarity weight (from retriever score)
 - `diversity_lambda`: Diversity bonus weight
 - `edit_lambda`: Edit penalty weight (stealth constraint)
@@ -93,5 +94,4 @@ templates, metric scripts, and small sample data.  Do not publish API keys,
 private database passwords, paid model credentials, or raw third-party datasets
 whose licenses do not permit redistribution.  For large datasets, publish
 preparation scripts, split IDs, hashes, and download instructions instead.
-
 

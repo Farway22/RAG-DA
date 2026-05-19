@@ -21,14 +21,30 @@ TOPK  = 5
 CHAT_TOKENIZER_DIR = "./deepseek_v3_tokenizer"
 
 # ================== 数据库连接 ==================
-conn = psycopg2.connect(
-    dbname="rag-vul",
-    user="postgres",
-    password="123456",
-    host="localhost",
-    port="5432"
-)
-cur = conn.cursor()
+def _connect_postgres():
+    """Create an optional PostgreSQL connection from environment variables."""
+    dsn = os.getenv("POSTGRES_DSN", "").strip()
+    user = os.getenv("POSTGRES_USER", "").strip()
+    if not dsn and not user:
+        print("[WARN] PostgreSQL not configured. Set POSTGRES_DSN or POSTGRES_* before running tokens.py.")
+        return None, None
+
+    kwargs = {
+        "dbname": os.getenv("POSTGRES_DB", "rag-vul"),
+        "user": user,
+        "password": os.getenv("POSTGRES_PASSWORD", ""),
+        "host": os.getenv("POSTGRES_HOST", "localhost"),
+        "port": os.getenv("POSTGRES_PORT", "5432"),
+    }
+    try:
+        conn_obj = psycopg2.connect(dsn) if dsn else psycopg2.connect(**kwargs)
+        return conn_obj, conn_obj.cursor()
+    except Exception as exc:
+        print(f"[WARN] PostgreSQL unavailable: {exc}")
+        return None, None
+
+
+conn, cur = _connect_postgres()
 
 # ================== 加载 FAISS 索引 ==================
 index_code = faiss.read_index("faiss/faiss_index_code.index")
@@ -42,6 +58,8 @@ def get_vuln_info_by_faiss_idx(idx: int):
     db_id = id_map.get(str(idx))
     if db_id is None:
         return None
+    if cur is None:
+        raise RuntimeError("PostgreSQL is not configured; set POSTGRES_DSN or POSTGRES_* before running tokens.py.")
     cur.execute("""
         SELECT cve_id, cwe_ids, code, description, base_score,
                base_severity, nvd_info, cwe_info

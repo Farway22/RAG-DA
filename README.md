@@ -70,7 +70,7 @@ unchanged.  The implementation follows the paper method:
 
 The current `rag_da.py` uses token-level normalized Levenshtein distance and
 supports recomputing retrieval similarity after renaming through
-`variant_score_fn`, matching the scoring logic described in `main2.tex`.
+`variant_score_fn`, matching the paper's variant-selection objective.
 
 ## Full Reproduction
 
@@ -83,7 +83,7 @@ pip install -r requirements.txt
 Configure a model backend with environment variables.  Example:
 
 ```powershell
-$env:DEEPSEEK_API_KEY = "<your key>"
+$env:DEEPSEEK_API_KEY = "<api key>"
 $env:DEEPSEEK_BASE_URL = "https://api.siliconflow.cn/v1"
 $env:DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-V3.2"
 ```

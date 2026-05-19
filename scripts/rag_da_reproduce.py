@@ -164,7 +164,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pool-size", type=int, default=int(os.getenv("POOL_SIZE", "30")))
     parser.add_argument("--beam-width", type=int, default=int(os.getenv("BEAM_WIDTH", "8")))
     parser.add_argument("--variant-m", type=int, default=int(os.getenv("VARIANT_M", "3")))
-    parser.add_argument("--rewrite-max-ids", type=int, default=int(os.getenv("REWRITE_MAX_IDS", "1")))
+    parser.add_argument("--rewrite-max-ids", type=int, default=int(os.getenv("REWRITE_MAX_IDS", "3")))
     parser.add_argument("--variant-seed", type=int, default=int(os.getenv("VARIANT_SEED", os.getenv("SHUFFLE_SEED", "42"))))
     parser.add_argument("--w-sim", type=float, default=float(os.getenv("W_SIM", "1.0")))
     parser.add_argument("--diversity-lambda", type=float, default=float(os.getenv("DIVERSITY_LAMBDA", "0.1")))
