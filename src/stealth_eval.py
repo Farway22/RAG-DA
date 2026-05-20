@@ -3,7 +3,7 @@
 The public artifact intentionally omits the historical ``code_trans/`` tree
 and large demonstration JSONL files.  Keep this script only as a pointer for
 authors who have the private archive; public users should rely on
-``rag-da-metrics.py`` and ``evaluation.py``.
+``src/rag-da-metrics.py`` and ``src/evaluation.py``.
 """
 
 import json

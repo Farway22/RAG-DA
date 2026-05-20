@@ -6,15 +6,15 @@ experiment dumps and scratch launchers are intentionally omitted from git.
 
 ## Code Map
 
-- `rag_da.py`: importable core attack implementation.
-- `rag-da.py`: compatibility wrapper for the historical hyphenated filename.
-- `rag-da-example.py`: small runnable example.
-- `rag-da-metrics.py`: CMR, DSR, and clean-correct ASR metrics.
-- `rename_ast.py`: richer AST identifier-renaming implementation used by the full pipeline.
-- `retrieval.py`: FAISS retrieval, prompt construction, and LLM inference.
+- `src/rag_da.py`: importable core attack implementation.
+- `src/rag-da.py`: compatibility wrapper for the historical hyphenated filename.
+- `examples/rag-da-example.py`: small runnable example.
+- `src/rag-da-metrics.py`: CMR, DSR, and clean-correct ASR metrics.
+- `src/rename_ast.py`: richer AST identifier-renaming implementation used by the full pipeline.
+- `src/retrieval.py`: FAISS retrieval, prompt construction, and LLM inference.
 - `scripts/rag_da_reproduce.py`: canonical clean baseline and RAG-DA attack runner.
 - `configs/vuln_beam_best.yaml`: paper-aligned public beam-search configuration.
-- `stealth_eval.py`: archival helper that requires omitted private `code_trans/` assets.
+- `src/stealth_eval.py`: archival helper that requires omitted private `code_trans/` assets.
 
 ## Minimal Usage
 
@@ -38,7 +38,7 @@ attack_demos = rag_da_attack(
 For a quick smoke test:
 
 ```powershell
-python rag-da-example.py
+python examples/rag-da-example.py
 ```
 
 ## Beam-Search Objective
@@ -71,7 +71,7 @@ similarity rather than silently inheriting the original demonstration score.
 
 ## Evaluation Metrics
 
-See `rag-da-metrics.py` for:
+See `src/rag-da-metrics.py` for:
 - **CMR_adv**: Critical Miss Rate (1 - Recall_Critical)
 - **DSR**: Downgrade Success Rate
 - **True ASR**: Attack Success Rate on clean-correct samples
@@ -94,4 +94,3 @@ templates, metric scripts, and small sample data.  Do not publish API keys,
 private database passwords, paid model credentials, or raw third-party datasets
 whose licenses do not permit redistribution.  For large datasets, publish
 preparation scripts, split IDs, hashes, and download instructions instead.
-

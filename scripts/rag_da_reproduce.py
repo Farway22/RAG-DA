@@ -3,8 +3,8 @@
 
 Pipeline:
 1. retrieve demonstrations with the FAISS code+description retriever;
-2. optionally rewrite only retrieved demonstration code with ``rag_da.py``;
-3. build the few-shot prompt through ``retrieval.py``;
+2. optionally rewrite only retrieved demonstration code with ``src/rag_da.py``;
+3. build the few-shot prompt through ``src/retrieval.py``;
 4. call the configured LLM;
 5. save resumable predictions to an Excel file.
 
@@ -26,8 +26,10 @@ import pandas as pd
 
 _THIS = pathlib.Path(__file__).resolve()
 _ROOT = _THIS.parents[1]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+_SRC = _ROOT / "src"
+for path in (str(_SRC), str(_ROOT)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 os.chdir(str(_ROOT))
 
 from rag_da import rag_da_attack

@@ -64,7 +64,7 @@ Keep enough external result files to make the paper tables traceable:
 
 - compact metric summaries, such as `result2/bigvul_results_metrics.json`;
 - final prediction workbooks used for reported numbers;
-- `EXPERIMENT_MANIFEST.md`, which maps result files to paper sections.
+- `docs/EXPERIMENT_MANIFEST.md`, which maps result files to paper sections.
 
 Avoid committing generated logs such as `*_run.log` and large intermediate
 `*_demos_full.jsonl` files unless they are necessary for a specific archival
