@@ -16,14 +16,14 @@ a canonical reproduction path, and the experiment artifacts used for the paper.
 Run the minimal example first:
 
 ```powershell
-uv run --python 3.12.10 python rag-da-example.py
+uv run --python 3.12.10 python examples/rag-da-example.py
 ```
 
 If Python and the dependencies are already installed, the plain command also
 works:
 
 ```powershell
-python rag-da-example.py
+python examples/rag-da-example.py
 ```
 
 Expected behavior:
@@ -42,17 +42,17 @@ The main files for RAG-DA are:
 
 | Purpose | File |
 | --- | --- |
-| Core RAG-DA attack module | `rag_da.py` |
-| Backward-compatible script wrapper | `rag-da.py` |
-| Minimal runnable example | `rag-da-example.py` |
+| Core RAG-DA attack module | `src/rag_da.py` |
+| Backward-compatible script wrapper | `src/rag-da.py` |
+| Minimal runnable example | `examples/rag-da-example.py` |
 | Clean/attack reproduction runner | `scripts/rag_da_reproduce.py` |
-| Retrieval, prompt construction, and LLM calls | `retrieval.py` |
-| Metric helpers | `rag-da-metrics.py`, `evaluation.py` |
+| Retrieval, prompt construction, and LLM calls | `src/retrieval.py` |
+| Metric helpers | `src/rag-da-metrics.py`, `src/evaluation.py` |
 | Detailed RAG-DA API notes | `README-rag-da.md` |
-| Full reproduction guide | `REPRODUCIBILITY.md` |
-| Paper-table artifact map | `EXPERIMENT_MANIFEST.md` |
+| Full reproduction guide | `docs/REPRODUCIBILITY.md` |
+| Paper-table artifact map | `docs/EXPERIMENT_MANIFEST.md` |
 
-For new runs, start from `rag_da.py` and `scripts/rag_da_reproduce.py`.  The
+For new runs, start from `src/rag_da.py` and `scripts/rag_da_reproduce.py`.  The
 public repository intentionally omits paper-development scratch files and
 historical sweep outputs that are not required to reproduce the RAG-DA method.
 
@@ -68,7 +68,7 @@ unchanged.  The implementation follows the paper method:
 4. select one variant per demonstration with a variant-first beam search;
 5. send the resulting demonstration set to the same downstream SVA prompt.
 
-The current `rag_da.py` uses token-level normalized Levenshtein distance and
+The current `src/rag_da.py` uses token-level normalized Levenshtein distance and
 supports recomputing retrieval similarity after renaming through
 `variant_score_fn`, matching the paper's variant-selection objective.
 
@@ -77,7 +77,7 @@ supports recomputing retrieval similarity after renaming through
 Install the full-pipeline dependencies:
 
 ```powershell
-pip install -r requirements.txt
+pip install -r requirements/requirements.txt
 ```
 
 Configure a model backend with environment variables.  Example:
@@ -111,7 +111,7 @@ $env:INPUT_FILE = "datasets/bigvul_hf/test_subset_1208_no_overlap.xlsx"
 $env:TRAIN_FILE = "datasets/train/train_all.xlsx"
 ```
 
-More commands and options are documented in `REPRODUCIBILITY.md`.
+More commands and options are documented in `docs/REPRODUCIBILITY.md`.
 
 ## Data and Indexes
 
@@ -127,7 +127,7 @@ The full experiments expect these local artifacts:
 | FAISS row map | `faiss/id_map.json` |
 | CSV fallback knowledge base | `datasets/megavul_simple_cpp_success_getast.csv` |
 
-`retrieval.py` treats PostgreSQL as optional.  If the database is unavailable,
+`src/retrieval.py` treats PostgreSQL as optional.  If the database is unavailable,
 the runner falls back to the CSV knowledge base when possible.
 
 Some benchmark datasets are large or have redistribution constraints.  See
@@ -155,10 +155,10 @@ committed.
 The GitHub repository is intentionally code-first.  Raw datasets, FAISS indexes,
 full prediction workbooks, prompt/response traces, and paper figures are not
 committed to the main branch.  Place downloaded or archived result files under
-the paths documented in `EXPERIMENT_MANIFEST.md` if you want to recompute paper
+the paths documented in `docs/EXPERIMENT_MANIFEST.md` if you want to recompute paper
 tables locally.
 
-Use `ARTIFACT_RELEASE.md` for the recommended release policy and
+Use `docs/ARTIFACT_RELEASE.md` for the recommended release policy and
 `result2/README.md` for the expected location of generated result files.
 
 ## Security and Release Hygiene

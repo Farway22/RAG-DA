@@ -5,14 +5,14 @@ example in the main README.
 
 ## Entry Points
 
-- Minimal attack example: `python rag-da-example.py`
+- Minimal attack example: `python examples/rag-da-example.py`
 - Canonical clean/attack runner: `python scripts/rag_da_reproduce.py`
-- Core attack implementation: `rag_da.py`
-- Retrieval, prompts, and LLM calls: `retrieval.py`
-- Metrics: `rag-da-metrics.py`, `evaluation.py`
+- Core attack implementation: `src/rag_da.py`
+- Retrieval, prompts, and LLM calls: `src/retrieval.py`
+- Metrics: `src/rag-da-metrics.py`, `src/evaluation.py`
 
 `scripts/rag_da_reproduce.py` is the canonical RAG-DA pipeline because it calls
-the shared `rag_da.py` implementation.  Historical scratch scripts and sweep
+the shared `src/rag_da.py` implementation.  Historical scratch scripts and sweep
 outputs are intentionally omitted from the public code release.
 
 ## Environment
@@ -20,7 +20,7 @@ outputs are intentionally omitted from the public code release.
 Install the Python dependencies used by the full pipeline:
 
 ```powershell
-pip install -r requirements.txt
+pip install -r requirements/requirements.txt
 ```
 
 The runner reads model credentials from environment variables.  Do not commit
@@ -47,7 +47,7 @@ Expected local files:
 - FAISS-to-row map: `faiss/id_map.json`
 - CSV fallback: `datasets/megavul_simple_cpp_success_getast.csv`
 
-`retrieval.py` now treats PostgreSQL as optional.  If `POSTGRES_*` variables are
+`src/retrieval.py` now treats PostgreSQL as optional.  If `POSTGRES_*` variables are
 not set or the database is unavailable, it falls back to the CSV file above when
 possible.
 
@@ -119,8 +119,8 @@ many selected demonstrations were edited.
 
 After producing clean and attack prediction files, use the metric helpers:
 
-- `rag-da-metrics.py` for CMR, DSR, and clean-correct ASR primitives;
-- `evaluation.py` for standard accuracy/F1/MCC.
+- `src/rag-da-metrics.py` for CMR, DSR, and clean-correct ASR primitives;
+- `src/evaluation.py` for standard accuracy/F1/MCC.
 
 For a camera-ready or archival release, add one command per paper table under
 `scripts/`, so users can trace each number directly to its analysis script.

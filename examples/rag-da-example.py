@@ -1,3 +1,11 @@
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
 from rag_da import rag_da_attack
 
 fixed_demos = [
@@ -39,5 +47,4 @@ for i, demo in enumerate(attack_demos):
     print(f"  CVE: {demo.get('cve_id')}")
     print(f"  Edited: {demo.get('_is_edited')}")
     print(f"  Code: {demo.get('code')[:50]}...")
-
 
