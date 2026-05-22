@@ -11,6 +11,8 @@ The original ReVul-CoT codebase is retained because the paper builds on its
 RAG-SVA pipeline.  The repository is organized around a small runnable example,
 a canonical reproduction path, and the experiment artifacts used for the paper.
 
+![RAG-DA framework](framework.png)
+
 ## Quick Start
 
 Run the minimal example first:
