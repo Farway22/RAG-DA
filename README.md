@@ -88,6 +88,20 @@ $env:DEEPSEEK_BASE_URL = "https://api.siliconflow.cn/v1"
 $env:DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-V3.2"
 ```
 
+The retrieval and embedding defaults can also be overridden without editing
+source files:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CODE_EMBEDDING_MODEL` | `microsoft/codebert-base` | Code embedding model used for FAISS-style retrieval |
+| `DESC_EMBEDDING_MODEL` | `shibing624/text2vec-base-multilingual` | Description embedding model |
+| `EMBED_MAX_LENGTH` | `256` | Maximum token length for embedding inputs |
+| `EMBED_POOLING` | `first_last_avg` | Embedding pooling strategy |
+| `RAG_ALPHA` | script-specific default | Code-similarity weight |
+| `RAG_BETA` | script-specific default | Description-similarity weight |
+| `TOPK` | `5` | Number of demonstrations |
+| `CHAT_TOKENIZER_DIR` | `./deepseek_v3_tokenizer` | Tokenizer path used by `src/tokens.py` |
+
 Then run the canonical clean baseline:
 
 ```powershell

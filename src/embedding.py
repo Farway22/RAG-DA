@@ -9,9 +9,11 @@ import torch
 import faiss
 import os
 
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-MAX_LENGTH = 256  # 每条文本/代码最大token长度
-POOLING = 'first_last_avg'  # 池化方式
+DEVICE = torch.device(os.getenv("DEVICE", "cuda" if torch.cuda.is_available() else "cpu"))
+MAX_LENGTH = int(os.getenv("EMBED_MAX_LENGTH", "256"))
+POOLING = os.getenv("EMBED_POOLING", "first_last_avg")
+CODE_EMBEDDING_MODEL = os.getenv("CODE_EMBEDDING_MODEL", "microsoft/codebert-base")
+DESC_EMBEDDING_MODEL = os.getenv("DESC_EMBEDDING_MODEL", "shibing624/text2vec-base-multilingual")
 
 # ================== 数据库连接 ===================
 def _connect_postgres():
@@ -36,14 +38,14 @@ cur = conn.cursor()
 
 # ================== 嵌入模型 ===================
 # CodeBERT
-code_model_name = "microsoft/codebert-base"
+code_model_name = CODE_EMBEDDING_MODEL
 code_tokenizer = AutoTokenizer.from_pretrained(code_model_name)
 code_model = AutoModel.from_pretrained(code_model_name)
 code_model.to(DEVICE)
 code_model.eval()
 
 # text2vec-base-multilingual
-desc_model_name = "shibing624/text2vec-base-multilingual"
+desc_model_name = DESC_EMBEDDING_MODEL
 desc_tokenizer = AutoTokenizer.from_pretrained(desc_model_name)
 desc_model = AutoModel.from_pretrained(desc_model_name)
 desc_model.to(DEVICE)
@@ -188,3 +190,4 @@ if __name__ == "__main__":
     main()
     cur.close()
     conn.close()
+

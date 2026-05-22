@@ -10,15 +10,17 @@ from transformers import AutoTokenizer, AutoModel
 import transformers
 
 # ================== 配置 ==================
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-MAX_LENGTH = 256
-POOLING = 'first_last_avg'
-ALPHA = 0.6  # code 权重
-BETA  = 0.4  # description 权重
-TOPK  = 5
+DEVICE = torch.device(os.getenv("DEVICE", "cuda" if torch.cuda.is_available() else "cpu"))
+MAX_LENGTH = int(os.getenv("EMBED_MAX_LENGTH", "256"))
+POOLING = os.getenv("EMBED_POOLING", "first_last_avg")
+CODE_EMBEDDING_MODEL = os.getenv("CODE_EMBEDDING_MODEL", "microsoft/codebert-base")
+DESC_EMBEDDING_MODEL = os.getenv("DESC_EMBEDDING_MODEL", "shibing624/text2vec-base-multilingual")
+ALPHA = float(os.getenv("RAG_ALPHA", "0.6"))
+BETA = float(os.getenv("RAG_BETA", "0.4"))
+TOPK = int(os.getenv("TOPK", "5"))
 
 # tokenizer（用于统计 token 数）
-CHAT_TOKENIZER_DIR = "./deepseek_v3_tokenizer"
+CHAT_TOKENIZER_DIR = os.getenv("CHAT_TOKENIZER_DIR", "./deepseek_v3_tokenizer")
 
 # ================== 数据库连接 ==================
 def _connect_postgres():
@@ -81,8 +83,8 @@ def get_vuln_info_by_faiss_idx(idx: int):
     }
 
 # ================== 加载嵌入模型==================
-code_model_name = "microsoft/codebert-base"
-desc_model_name = "shibing624/text2vec-base-multilingual"
+code_model_name = CODE_EMBEDDING_MODEL
+desc_model_name = DESC_EMBEDDING_MODEL
 
 code_tokenizer = AutoTokenizer.from_pretrained(code_model_name)
 code_model     = AutoModel.from_pretrained(code_model_name).to(DEVICE)
@@ -316,3 +318,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

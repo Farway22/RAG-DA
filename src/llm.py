@@ -19,12 +19,14 @@ except ImportError:  # Optional GLM SDK; not required for the public pipeline.
     ZhipuAiClient = None
 
 # ================== 配置 ==================
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-MAX_LENGTH = 256
-POOLING = 'first_last_avg'
-ALPHA = 0.9  # code 权重
-BETA = 0.1  # description 权重
-TOPK = 5
+DEVICE = torch.device(os.getenv("DEVICE", "cuda" if torch.cuda.is_available() else "cpu"))
+MAX_LENGTH = int(os.getenv("EMBED_MAX_LENGTH", "256"))
+POOLING = os.getenv("EMBED_POOLING", "first_last_avg")
+CODE_EMBEDDING_MODEL = os.getenv("CODE_EMBEDDING_MODEL", "microsoft/codebert-base")
+DESC_EMBEDDING_MODEL = os.getenv("DESC_EMBEDDING_MODEL", "shibing624/text2vec-base-multilingual")
+ALPHA = float(os.getenv("RAG_ALPHA", "0.6"))
+BETA = float(os.getenv("RAG_BETA", "0.4"))
+TOPK = int(os.getenv("TOPK", "5"))
 
 # ================== 数据库连接 ===================
 def _connect_postgres():
@@ -93,8 +95,8 @@ def get_vuln_info_by_faiss_idx(idx):
     return None
 
 # ================== 加载模型 ==================
-code_model_name = "microsoft/codebert-base"
-desc_model_name = "shibing624/text2vec-base-multilingual"
+code_model_name = CODE_EMBEDDING_MODEL
+desc_model_name = DESC_EMBEDDING_MODEL
 
 code_tokenizer = AutoTokenizer.from_pretrained(code_model_name)
 code_model = AutoModel.from_pretrained(code_model_name).to(DEVICE)
@@ -268,7 +270,7 @@ def predict_vuln_level_fewshot_cot(query_code, query_desc, topk_samples):
 
     # ================== DeepSeek 调用 ==================
     # response = client.chat.completions.create(
-    #     model="deepseek-chat",
+    #     model="deepseek-ai/DeepSeek-V3.2",
     #     messages=[
     #         {"role": "system", "content": "You are an expert in code vulnerability assessment, and you will rate the vulnerabilities based on the following scoring criteria:\n0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL."},
     #         {"role": "user", "content": prompt}
@@ -428,3 +430,4 @@ if __name__ == "__main__":
             os.replace(temp_file, output_file)
 
         print(f"预测完成，结果已保存到 {output_file}")
+

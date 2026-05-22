@@ -17,12 +17,14 @@ import time
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 # ================== 配置 ==================
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-MAX_LENGTH = 256
-POOLING = 'first_last_avg'
-ALPHA = 0.6  # code 权重
-BETA = 0.4  # description 权重
-TOPK = 5
+DEVICE = torch.device(os.getenv("DEVICE", "cuda" if torch.cuda.is_available() else "cpu"))
+MAX_LENGTH = int(os.getenv("EMBED_MAX_LENGTH", "256"))
+POOLING = os.getenv("EMBED_POOLING", "first_last_avg")
+CODE_EMBEDDING_MODEL = os.getenv("CODE_EMBEDDING_MODEL", "microsoft/codebert-base")
+DESC_EMBEDDING_MODEL = os.getenv("DESC_EMBEDDING_MODEL", "shibing624/text2vec-base-multilingual")
+ALPHA = float(os.getenv("RAG_ALPHA", "0.6"))
+BETA = float(os.getenv("RAG_BETA", "0.4"))
+TOPK = int(os.getenv("TOPK", "5"))
 
 # ================== 数据库连接 ===================
 def _connect_postgres():
@@ -132,8 +134,8 @@ def get_vuln_info_by_faiss_idx(idx):
 
 
 # ================== 加载模型 ==================
-code_model_name = "microsoft/codebert-base"
-desc_model_name = "shibing624/text2vec-base-multilingual"
+code_model_name = CODE_EMBEDDING_MODEL
+desc_model_name = DESC_EMBEDDING_MODEL
 # rerank_model_name = "microsoft/unixcoder-base"
 
 code_tokenizer = AutoTokenizer.from_pretrained(code_model_name)
@@ -303,7 +305,7 @@ _MODEL = (
     os.getenv("GPT_MODEL") or 
     os.getenv("QWEN_MODEL") or 
     os.getenv("DEEPSEEK_MODEL") or 
-    "deepseek-chat"
+    "deepseek-ai/DeepSeek-V3.2"
 ).strip()
 _API_KEY = (
     os.getenv("GPT_API_KEY") or 
@@ -1143,7 +1145,7 @@ def predict_vuln_level_rag_llm_beam(
     try:
         if os.getenv("APPLY_REWRITE", "0").strip() == "1":
             target = os.getenv("REWRITE_TARGET", "demos").strip().lower()  # demos|query|both
-            max_ids = int(os.getenv("REWRITE_MAX_IDS", "2"))
+            max_ids = int(os.getenv("REWRITE_MAX_IDS", "3"))
             seed = int(os.getenv("REWRITE_SEED", os.getenv("SHUFFLE_SEED", "42")))
             if target in ("query", "both"):
                 query_code = rename_identifiers_safe(query_code, max_ids=max_ids, seed=seed)
@@ -1841,7 +1843,7 @@ def predict_vuln_level_rag_llm_beam(
     try:
         if os.getenv("APPLY_REWRITE", "0").strip() == "1":
             target = os.getenv("REWRITE_TARGET", "demos").strip().lower()  # demos|query|both
-            max_ids = int(os.getenv("REWRITE_MAX_IDS", "2"))
+            max_ids = int(os.getenv("REWRITE_MAX_IDS", "3"))
             seed = int(os.getenv("REWRITE_SEED", os.getenv("SHUFFLE_SEED", "42")))
             if target in ("query", "both"):
                 query_code = rename_identifiers_safe(query_code, max_ids=max_ids, seed=seed)
@@ -1978,3 +1980,4 @@ if __name__ == "__main__":
                 break
 
         print(f"预测完成，结果已保存到 {output_file}")
+

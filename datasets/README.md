@@ -25,7 +25,7 @@ The full reproduction scripts look for the following paths:
 The smoke test in the repository root does not require these datasets:
 
 ```powershell
-python rag-da-example.py
+python examples/rag-da-example.py
 ```
 
 ## Public Release Guidance

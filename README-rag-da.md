@@ -9,7 +9,7 @@ experiment dumps and scratch launchers are intentionally omitted from git.
 - `src/rag_da.py`: importable core attack implementation.
 - `src/rag-da.py`: compatibility wrapper for the historical hyphenated filename.
 - `examples/rag-da-example.py`: small runnable example.
-- `src/rag-da-metrics.py`: CMR, DSR, and clean-correct ASR metrics.
+- `src/rag-da-metrics.py`: CMR, DSR, and clean-correct under-triage ASR metrics.
 - `src/rename_ast.py`: richer AST identifier-renaming implementation used by the full pipeline.
 - `src/retrieval.py`: FAISS retrieval, prompt construction, and LLM inference.
 - `scripts/rag_da_reproduce.py`: canonical clean baseline and RAG-DA attack runner.
@@ -69,12 +69,18 @@ similarity rather than silently inheriting the original demonstration score.
 - `variant_score_fn`: Optional callback for recomputing retrieval similarity
   for each renamed variant
 
+The full retrieval scripts also read environment variables for reproducible
+configuration.  Common overrides include `CODE_EMBEDDING_MODEL`,
+`DESC_EMBEDDING_MODEL`, `EMBED_MAX_LENGTH`, `EMBED_POOLING`, `RAG_ALPHA`,
+`RAG_BETA`, `TOPK`, and `CHAT_TOKENIZER_DIR`.
+
 ## Evaluation Metrics
 
 See `src/rag-da-metrics.py` for:
 - **CMR_adv**: Critical Miss Rate (1 - Recall_Critical)
-- **DSR**: Downgrade Success Rate
-- **True ASR**: Attack Success Rate on clean-correct samples
+- **DSR**: Downgrade Success Rate on ground-truth High/Critical samples
+- **True ASR**: Fraction of clean-correct samples whose adversarial prediction
+  is lower than the ground-truth severity
 
 ## Dependencies
 

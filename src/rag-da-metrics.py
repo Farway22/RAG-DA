@@ -13,8 +13,8 @@ def calculate_cmr_adv(y_true: List[str], y_adv: List[str]) -> tuple:
     cmr_adv = n_crit_missed / len(crit_indices)
     return cmr_adv * 100, n_crit_missed, len(crit_indices)
 
-def calculate_dsr(y_clean: List[str], y_adv: List[str]) -> tuple:
-    high_risk_indices = [i for i, sev in enumerate(y_clean) if sev.upper() in ["HIGH", "CRITICAL"]]
+def calculate_dsr(y_true: List[str], y_clean: List[str], y_adv: List[str]) -> tuple:
+    high_risk_indices = [i for i, sev in enumerate(y_true) if sev.upper() in ["HIGH", "CRITICAL"]]
     if not high_risk_indices:
         return None, 0, 0
     downgraded = sum(1 for i in high_risk_indices if severity_less_than(y_adv[i], y_clean[i]))
@@ -25,8 +25,8 @@ def calculate_true_asr(y_true: List[str], y_clean: List[str], y_adv: List[str]) 
     clean_correct_indices = [i for i in range(len(y_true)) if y_clean[i].upper() == y_true[i].upper()]
     if not clean_correct_indices:
         return None, 0, 0
-    attacked_wrong = sum(1 for i in clean_correct_indices if y_adv[i].upper() != y_true[i].upper())
-    true_asr = attacked_wrong / len(clean_correct_indices)
-    return true_asr * 100, attacked_wrong, len(clean_correct_indices)
+    under_triaged = sum(1 for i in clean_correct_indices if severity_less_than(y_adv[i], y_true[i]))
+    true_asr = under_triaged / len(clean_correct_indices)
+    return true_asr * 100, under_triaged, len(clean_correct_indices)
 
 

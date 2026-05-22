@@ -29,7 +29,7 @@ real API keys.
 ```powershell
 $env:DEEPSEEK_API_KEY = "<api key>"
 $env:DEEPSEEK_BASE_URL = "https://api.example.com/v1"
-$env:DEEPSEEK_MODEL = "deepseek-chat"
+$env:DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-V3.2"
 ```
 
 OpenAI-compatible backends can also be configured with `GPT_API_KEY`,
@@ -119,7 +119,8 @@ many selected demonstrations were edited.
 
 After producing clean and attack prediction files, use the metric helpers:
 
-- `src/rag-da-metrics.py` for CMR, DSR, and clean-correct ASR primitives;
+- `src/rag-da-metrics.py` for CMR, DSR on ground-truth High/Critical samples,
+  and clean-correct under-triage ASR primitives;
 - `src/evaluation.py` for standard accuracy/F1/MCC.
 
 For a camera-ready or archival release, add one command per paper table under
