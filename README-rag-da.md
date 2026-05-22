@@ -1,20 +1,15 @@
 # RAG-DA: Retrieval-Augmented Demonstration Attack
 
-This directory contains the minimal public RAG-DA artifact plus the canonical
-runner used to reproduce clean and attacked RAG-SVA predictions.  Large private
-experiment dumps and scratch launchers are intentionally omitted from git.
+Public release layout for reproducing clean and attacked RAG-SVA predictions.
 
-## Code Map
+## Official Entry Points
 
 - `src/rag_da.py`: importable core attack implementation.
-- `src/rag-da.py`: compatibility wrapper for the historical hyphenated filename.
-- `examples/rag-da-example.py`: small runnable example.
-- `src/rag-da-metrics.py`: CMR, DSR, and clean-correct under-triage ASR metrics.
-- `src/rename_ast.py`: richer AST identifier-renaming implementation used by the full pipeline.
-- `src/retrieval.py`: FAISS retrieval, prompt construction, and LLM inference.
+- `examples/rag-da-example.py`: dependency-free smoke test.
 - `scripts/rag_da_reproduce.py`: canonical clean baseline and RAG-DA attack runner.
-- `configs/vuln_beam_best.yaml`: paper-aligned public beam-search configuration.
-- `src/stealth_eval.py`: archival helper that requires omitted private `code_trans/` assets.
+- `scripts/compute_metrics.py`: accuracy / F1 / MCC plus CMR, DSR, and true ASR.
+- `configs/vuln_beam_best.yaml`: paper-aligned beam-search configuration.
+- `src/retrieval.py`: FAISS retrieval, prompt construction, and LLM inference.
 
 ## Minimal Usage
 
@@ -35,68 +30,57 @@ attack_demos = rag_da_attack(
 )
 ```
 
-For a quick smoke test:
-
 ```powershell
 python examples/rag-da-example.py
 ```
 
 ## Beam-Search Objective
 
-The public implementation now uses token-level normalized Levenshtein
-distance for edit/stealth and diversity terms.  The similarity term supports
-two modes:
+The public implementation uses token-level normalized Levenshtein distance for
+edit/stealth and diversity terms.  The similarity term supports:
 
 - default: use the candidate's stored retriever score (`score`);
-- paper-aligned: pass `variant_score_fn(variant, original)` to recompute
-  retrieval similarity after identifier renaming.
-
-The second mode is the one to use when the FAISS index and embedding models are
-available, because renamed variants should be scored with their own retrieval
-similarity rather than silently inheriting the original demonstration score.
+- paper-aligned: pass `variant_score_fn(variant, original)` to recompute retrieval
+  similarity after identifier renaming.
 
 ## Parameters
 
 - `fixed_demos`: fixed demonstration set D_q
-- `k`: Number of demonstrations to select
-- `beam_width`: Beam search width
-- `variant_m`: Number of variants per base demo
-- `max_ids`: Maximum identifiers to rename per demo.  The paper-aligned
-  public config uses `3`; the smoke test may use a smaller value for readability.
-- `w_sim`: Similarity weight (from retriever score)
-- `diversity_lambda`: Diversity bonus weight
-- `edit_lambda`: Edit penalty weight (stealth constraint)
-- `variant_score_fn`: Optional callback for recomputing retrieval similarity
-  for each renamed variant
+- `k`: number of demonstrations to select
+- `beam_width`: beam search width
+- `variant_m`: number of variants per base demo
+- `max_ids`: maximum identifiers to rename per demo
+- `w_sim`: similarity weight
+- `diversity_lambda`: diversity bonus weight
+- `edit_lambda`: edit penalty weight
+- `variant_score_fn`: optional callback for recomputing retrieval similarity
 
-The full retrieval scripts also read environment variables for reproducible
-configuration.  Common overrides include `CODE_EMBEDDING_MODEL`,
+Environment variables for the full pipeline include `CODE_EMBEDDING_MODEL`,
 `DESC_EMBEDDING_MODEL`, `EMBED_MAX_LENGTH`, `EMBED_POOLING`, `RAG_ALPHA`,
-`RAG_BETA`, `TOPK`, and `CHAT_TOKENIZER_DIR`.
+`RAG_BETA`, `TOPK`, `FAISS_CODE_INDEX`, `FAISS_DESC_INDEX`, and `FAISS_ID_MAP`.
 
 ## Evaluation Metrics
 
-See `src/rag-da-metrics.py` for:
-- **CMR_adv**: Critical Miss Rate (1 - Recall_Critical)
+`src/rag_da_metrics.py` defines:
+
+- **CMR_adv**: Critical Miss Rate
 - **DSR**: Downgrade Success Rate on ground-truth High/Critical samples
-- **True ASR**: Fraction of clean-correct samples whose adversarial prediction
-  is lower than the ground-truth severity
+- **True ASR**: under-triage rate on clean-correct samples
 
-## Dependencies
+Run:
 
-- tree-sitter (C language parser)
-- tree-sitter-c (C grammar)
+```powershell
+python scripts/compute_metrics.py --predictions result2/reproduce/megavul_attack.xlsx --clean result2/reproduce/megavul_clean.xlsx
+```
 
 ## Threat Model
 
-- **Fixed D_q**: Retriever output is fixed, only variant selection is allowed
-- **Black-box**: No ground-truth labels used in scoring
-- **AST-consistent**: Renaming preserves syntax and scope semantics
+- **Fixed D_q**: retriever output is fixed; only variant selection changes
+- **Black-box**: no ground-truth labels in attack scoring
+- **AST-consistent**: renaming preserves syntax and scope semantics
 
-## What To Open Source
+## Public Release Scope
 
-For a reproducibility release, include the source files above, configs, prompt
-templates, metric scripts, and small sample data.  Do not publish API keys,
-private database passwords, paid model credentials, or raw third-party datasets
-whose licenses do not permit redistribution.  For large datasets, publish
-preparation scripts, split IDs, hashes, and download instructions instead.
+Include source code, configs, documentation, and small sample data only.
+Do not publish API keys, private database passwords, or raw third-party datasets
+whose licenses do not permit redistribution.

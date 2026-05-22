@@ -47,6 +47,9 @@ tokenizer_cache/
 deepseek_v3_tokenizer/
 tree-sitter-c/
 
+# Internal dataset-prep scripts (not part of public reproduction).
+prompts/
+
 # Historical scratch workspaces and paper-development intermediates that are
 # not part of the public RAG-DA release.
 code_trans/

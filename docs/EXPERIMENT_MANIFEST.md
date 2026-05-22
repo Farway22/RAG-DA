@@ -11,11 +11,10 @@ when licensing and size permit.
 | Purpose | Path |
 | --- | --- |
 | Core RAG-DA implementation | `src/rag_da.py` |
-| Compatibility wrapper | `src/rag-da.py` |
 | Minimal runnable example | `examples/rag-da-example.py` |
 | Clean/attack runner | `scripts/rag_da_reproduce.py` |
 | Retrieval and prompting | `src/retrieval.py` |
-| Metrics | `src/rag-da-metrics.py`, `src/evaluation.py` |
+| Metrics | `src/rag_da_metrics.py`, `scripts/compute_metrics.py` |
 
 ## Model Labels
 

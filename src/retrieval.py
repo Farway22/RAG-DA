@@ -11,12 +11,10 @@ import transformers
 import os
 import json
 from openai import OpenAI
-import pathlib
-import sys
 import time
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-# ================== 配置 ==================
+# ================== 閰嶇疆 ==================
 DEVICE = torch.device(os.getenv("DEVICE", "cuda" if torch.cuda.is_available() else "cpu"))
 MAX_LENGTH = int(os.getenv("EMBED_MAX_LENGTH", "256"))
 POOLING = os.getenv("EMBED_POOLING", "first_last_avg")
@@ -26,7 +24,7 @@ ALPHA = float(os.getenv("RAG_ALPHA", "0.6"))
 BETA = float(os.getenv("RAG_BETA", "0.4"))
 TOPK = int(os.getenv("TOPK", "5"))
 
-# ================== 数据库连接 ===================
+# ================== 鏁版嵁搴撹繛鎺?===================
 def _connect_postgres():
     """Return an optional PostgreSQL connection.
 
@@ -73,15 +71,67 @@ def _load_fallback_df():
 # Global reference to current evaluation DataFrame (for NO_RAG pool)
 CURRENT_EVAL_DF = None
 
-# ================== 加载 FAISS 索引 ==================
-index_code = faiss.read_index("faiss/faiss_index_code.index")
-index_desc = faiss.read_index("faiss/faiss_index_desc.index")
-# ================== FAISS idx → 数据库 id 映射 ==================
-with open("faiss/id_map.json", "r", encoding="utf-8") as f:
-    id_map = json.load(f)  # id_map: {faiss_idx_str: db_id}
+# ================== FAISS indexes (lazy) ==================
+_index_code = None
+_index_desc = None
+_id_map = None
+
+
+def _faiss_paths():
+    root = os.getenv("FAISS_DIR", "faiss")
+    return (
+        os.getenv("FAISS_CODE_INDEX", os.path.join(root, "faiss_index_code.index")),
+        os.getenv("FAISS_DESC_INDEX", os.path.join(root, "faiss_index_desc.index")),
+        os.getenv("FAISS_ID_MAP", os.path.join(root, "id_map.json")),
+    )
+
+
+def _ensure_faiss_loaded() -> None:
+    global _index_code, _index_desc, _id_map
+    if _index_code is not None:
+        return
+    code_path, desc_path, map_path = _faiss_paths()
+    for path, label in (
+        (code_path, "code index"),
+        (desc_path, "description index"),
+        (map_path, "id map"),
+    ):
+        if not os.path.isfile(path):
+            raise FileNotFoundError(
+                f"Missing FAISS artifact ({label}): {path}. "
+                "Place indexes under faiss/ or set FAISS_CODE_INDEX / "
+                "FAISS_DESC_INDEX / FAISS_ID_MAP."
+            )
+    _index_code = faiss.read_index(code_path)
+    _index_desc = faiss.read_index(desc_path)
+    with open(map_path, "r", encoding="utf-8") as fh:
+        _id_map = json.load(fh)
+
+
+class _LazyFaissIndex:
+    """Defer FAISS loading so imports work without local indexes."""
+
+    def __init__(self, which: str) -> None:
+        self._which = which
+
+    def _index(self):
+        _ensure_faiss_loaded()
+        return _index_code if self._which == "code" else _index_desc
+
+    def search(self, *args, **kwargs):
+        return self._index().search(*args, **kwargs)
+
+    def reconstruct(self, *args, **kwargs):
+        return self._index().reconstruct(*args, **kwargs)
+
+
+index_code = _LazyFaissIndex("code")
+index_desc = _LazyFaissIndex("desc")
+
 
 def get_vuln_info_by_faiss_idx(idx):
-    db_id = id_map.get(str(idx))  # FAISS 索引对应数据库 id
+    _ensure_faiss_loaded()
+    db_id = _id_map.get(str(idx))
     if db_id is None:
         return None
     try:
@@ -133,26 +183,28 @@ def get_vuln_info_by_faiss_idx(idx):
     return None
 
 
-# ================== 加载模型 ==================
-code_model_name = CODE_EMBEDDING_MODEL
-desc_model_name = DESC_EMBEDDING_MODEL
-# rerank_model_name = "microsoft/unixcoder-base"
+# ================== Embedding models (lazy) ==================
+_code_tokenizer = None
+_code_model = None
+_desc_tokenizer = None
+_desc_model = None
 
-code_tokenizer = AutoTokenizer.from_pretrained(code_model_name)
-code_model = AutoModel.from_pretrained(code_model_name).to(DEVICE)
-code_model.eval()
 
-desc_tokenizer = AutoTokenizer.from_pretrained(desc_model_name)
-desc_model = AutoModel.from_pretrained(desc_model_name).to(DEVICE)
-desc_model.eval()
+def _ensure_embed_models() -> None:
+    global _code_tokenizer, _code_model, _desc_tokenizer, _desc_model
+    if _code_model is not None:
+        return
+    _code_tokenizer = AutoTokenizer.from_pretrained(CODE_EMBEDDING_MODEL)
+    _code_model = AutoModel.from_pretrained(CODE_EMBEDDING_MODEL).to(DEVICE)
+    _code_model.eval()
+    _desc_tokenizer = AutoTokenizer.from_pretrained(DESC_EMBEDDING_MODEL)
+    _desc_model = AutoModel.from_pretrained(DESC_EMBEDDING_MODEL).to(DEVICE)
+    _desc_model.eval()
 
-# rerank_tokenizer = AutoTokenizer.from_pretrained(rerank_model_name)
-# rerank_model = AutoModelForSequenceClassification.from_pretrained(rerank_model_name).to(DEVICE)
-# rerank_model.eval()
 
-# ================== 向量化函数 ==================
+# ================== Embedding helpers ==================
 def embed_text(text, tokenizer, model, max_length=MAX_LENGTH, pooling=POOLING):
-    # 确保text是字符串类型
+    # 纭繚text鏄瓧绗︿覆绫诲瀷
     if not isinstance(text, str):
         if text is None:
             text = ''
@@ -175,12 +227,14 @@ def embed_text(text, tokenizer, model, max_length=MAX_LENGTH, pooling=POOLING):
     return vec / np.linalg.norm(vec)
 
 def embed_code(text):
-    return embed_text(text, code_tokenizer, code_model)
+    _ensure_embed_models()
+    return embed_text(text, _code_tokenizer, _code_model)
 
 def embed_desc(text):
-    return embed_text(text, desc_tokenizer, desc_model)
+    _ensure_embed_models()
+    return embed_text(text, _desc_tokenizer, _desc_model)
 
-# ================== 多模态 RAG 检索 ==================
+# ================== 澶氭ā鎬?RAG 妫€绱?==================
 # def cross_encoder_rerank(query_code, query_desc, candidates, topk, batch_size=8):
 #     texts_a = [query_desc + "\n" + query_code] * len(candidates)
 #     texts_b = [cand['description'] + "\n" + cand['code'] for cand in candidates]
@@ -188,7 +242,7 @@ def embed_desc(text):
 #     scores = []
 #     rerank_model.eval()
 #
-#     # 分 batch 处理
+#     # 鍒?batch 澶勭悊
 #     for i in range(0, len(candidates), batch_size):
 #         batch_a = texts_a[i:i + batch_size]
 #         batch_b = texts_b[i:i + batch_size]
@@ -201,25 +255,25 @@ def embed_desc(text):
 #             return_tensors="pt"
 #         ).to(DEVICE)
 #         with torch.no_grad():
-#             logits = rerank_model(**inputs).logits  # [batch, 1] 或 [batch, 2]
-#             # 如果是二分类，取正类概率
+#             logits = rerank_model(**inputs).logits  # [batch, 1] 鎴?[batch, 2]
+#             # 濡傛灉鏄簩鍒嗙被锛屽彇姝ｇ被姒傜巼
 #             if logits.size(1) == 2:
-#                 prob = torch.softmax(logits, dim=1)[:, 1]  # 正类概率
+#                 prob = torch.softmax(logits, dim=1)[:, 1]  # 姝ｇ被姒傜巼
 #             else:
 #                 prob = logits.squeeze()
 #             scores.extend(prob.cpu().numpy().tolist())
 #
-#     # 排序
+#     # 鎺掑簭
 #     ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
 #     return [item[0] for item in ranked[:topk]]
 
 def rag_multimodal_search(query_code, query_desc, topk=TOPK, alpha=ALPHA, beta=BETA, search_factor: int = None, return_limit: int = None):
     """
-    检索并合并 code/desc 候选。
-    - search_factor: 每模态搜索扩大系数（默认2，或由环境变量 RAG_SEARCH_FACTOR 覆盖）
-    - return_limit: 返回上限（默认与 topk 相同）
+    妫€绱㈠苟鍚堝苟 code/desc 鍊欓€夈€?
+    - search_factor: 姣忔ā鎬佹悳绱㈡墿澶х郴鏁帮紙榛樿2锛屾垨鐢辩幆澧冨彉閲?RAG_SEARCH_FACTOR 瑕嗙洊锛?
+    - return_limit: 杩斿洖涓婇檺锛堥粯璁や笌 topk 鐩稿悓锛?
     """
-    # 1. 获取向量
+    # 1. 鑾峰彇鍚戦噺
     code_vec = np.array(embed_code(query_code), dtype='float32').reshape(1, -1)
     desc_vec = np.array(embed_desc(query_desc), dtype='float32').reshape(1, -1)
 
@@ -233,12 +287,12 @@ def rag_multimodal_search(query_code, query_desc, topk=TOPK, alpha=ALPHA, beta=B
     if return_limit is None:
         return_limit = topk
 
-    # 2. L2搜索，取各自扩大后的 topk
+    # 2. L2鎼滅储锛屽彇鍚勮嚜鎵╁ぇ鍚庣殑 topk
     search_k = max(1, topk * search_factor)
     _, idx_code = index_code.search(code_vec, search_k)
     _, idx_desc = index_desc.search(desc_vec, search_k)
 
-    # 3. 合并候选索引
+    # 3. 鍚堝苟鍊欓€夌储寮?
     candidate_idx = list(set(idx_code[0].tolist() + idx_desc[0].tolist()))
 
     results = []
@@ -251,29 +305,29 @@ def rag_multimodal_search(query_code, query_desc, topk=TOPK, alpha=ALPHA, beta=B
         db_code_vec = index_code.reconstruct(idx)
         db_desc_vec = index_desc.reconstruct(idx)
 
-        # 4. 计算余弦相似度
+        # 4. 璁＄畻浣欏鸡鐩镐技搴?
         code_sim = np.dot(code_vec, db_code_vec).item()
         desc_sim = np.dot(desc_vec, db_desc_vec).item()
 
-        # 5. 加权
+        # 5. 鍔犳潈
         score = alpha * code_sim + beta * desc_sim
         vuln_info["score"] = score
         results.append(vuln_info)
 
-    # 统计映射覆盖
+    # 缁熻鏄犲皠瑕嗙洊
     try:
         if os.getenv("PRINT_RAG", "0").strip() == "1":
             print(f"[RAG] candidates={len(candidate_idx)} mapped={len(results)} missing_map={missing} (search_k={search_k}, return_limit={return_limit})")
     except Exception:
         pass
 
-    # 排序并限制返回数量
+    # 鎺掑簭骞堕檺鍒惰繑鍥炴暟閲?
     results = sorted(results, key=lambda x: x["score"], reverse=True)
     if return_limit is not None and return_limit > 0:
         results = results[:return_limit]
 
     return results
-    # # 使用 Cross-Encoder 进行重排序
+    # # 浣跨敤 Cross-Encoder 杩涜閲嶆帓搴?
     # ranked_candidates = cross_encoder_rerank(query_code, query_desc, results, topk)
     # for item in ranked_candidates:
     #     # print(f"CVE ID: {item['cve_id']}, CWE IDs: {item['cwe_ids']}, Base Score: {item['base_score']}, "
@@ -281,54 +335,30 @@ def rag_multimodal_search(query_code, query_desc, topk=TOPK, alpha=ALPHA, beta=B
     #     #       f"NVD Info: {item['nvd_info']}, CWE Info: {item['cwe_info']}, Score: {item['score']:.4f}")
     #     print(f"Score: {item['score']:.4f}, Code: {item['code']}")
     # print('========================================================================')
-    # # 返回重排序后的结果
+    # # 杩斿洖閲嶆帓搴忓悗鐨勭粨鏋?
     # return ranked_candidates
 
 
-# ================== DeepSeek 调用 ==================
-# import beam selector (Demonstration attack policy)
-try:
-    sys.path.append(str(pathlib.Path("Demontration attack").resolve()))
-    from da.policy import select_topk
-except Exception:
-    select_topk = None
-
-# LLM client configuration - supports DeepSeek, Qwen, and GPT
-# Priority: GPT_* > QWEN_* > DEEPSEEK_* > default
+# ================== LLM client (OpenAI-compatible) ==================
 _BASE_URL = (
-    os.getenv("GPT_BASE_URL") or 
-    os.getenv("QWEN_BASE_URL") or 
-    os.getenv("DEEPSEEK_BASE_URL") or 
-    "https://api.deepseek.com"
+    os.getenv("GPT_BASE_URL")
+    or os.getenv("QWEN_BASE_URL")
+    or os.getenv("DEEPSEEK_BASE_URL")
+    or "https://api.deepseek.com"
 ).strip()
 _MODEL = (
-    os.getenv("GPT_MODEL") or 
-    os.getenv("QWEN_MODEL") or 
-    os.getenv("DEEPSEEK_MODEL") or 
-    "deepseek-ai/DeepSeek-V3.2"
+    os.getenv("GPT_MODEL")
+    or os.getenv("QWEN_MODEL")
+    or os.getenv("DEEPSEEK_MODEL")
+    or "deepseek-ai/DeepSeek-V3.2"
 ).strip()
 _API_KEY = (
-    os.getenv("GPT_API_KEY") or 
-    os.getenv("QWEN_API_KEY") or 
-    os.getenv("DEEPSEEK_API_KEY") or 
-    os.getenv("OPENAI_API_KEY") or 
-    ""
+    os.getenv("GPT_API_KEY")
+    or os.getenv("QWEN_API_KEY")
+    or os.getenv("DEEPSEEK_API_KEY")
+    or os.getenv("OPENAI_API_KEY")
+    or ""
 ).strip()
-
-# Optional import of DeepseekClient (fallback only)
-deepseek_client = None
-try:
-    from code_trans.gen_attack.utils.llm import DeepseekClient
-    deepseek_client = DeepseekClient(
-        base_url=_BASE_URL,
-        model_primary=_MODEL,
-        model_fallback=_MODEL,
-        temperature=0.0,
-        max_tokens=512,
-    )
-except (ImportError, Exception):
-    # If DeepseekClient is not available, we'll use OpenAI client as fallback
-    deepseek_client = None
 
 def _chat_official(messages):
     """Optional: use the exact official SDK call path if USE_OFFICIAL_DIRECT=1"""
@@ -384,7 +414,7 @@ def _chat_raw(messages):
         "stream": False,
     }
     max_retries = int(os.getenv("LLM_MAX_RETRIES", "3"))
-    timeout = float(os.getenv("LLM_TIMEOUT", "180"))  # 增加到180秒
+    timeout = float(os.getenv("LLM_TIMEOUT", "180"))  # 澧炲姞鍒?80绉?
     backoff = float(os.getenv("LLM_BACKOFF", "2"))
     
     last_err = None
@@ -407,7 +437,47 @@ def _chat_raw(messages):
                 print(f"[ERROR] API call failed after {max_retries} attempts: {e}")
                 raise
 
-# ================== 演示攻击：安全标识符重命名（可开关） ==================
+
+def _call_llm(messages) -> str:
+    """Canonical OpenAI-compatible inference path for the public release."""
+    if not _API_KEY:
+        raise RuntimeError(
+            "No LLM API key configured. Set DEEPSEEK_API_KEY, OPENAI_API_KEY, "
+            "GPT_API_KEY, or QWEN_API_KEY before running inference."
+        )
+    off = _chat_official(messages)
+    if off is not None:
+        return off.choices[0].message.content if off and off.choices else ""
+    raw = _chat_raw(messages)
+    if raw is not None:
+        return raw.choices[0]["message"]["content"] if raw and getattr(raw, "choices", None) else ""
+    client = OpenAI(api_key=_API_KEY, base_url=_BASE_URL)
+    resp = client.chat.completions.create(
+        model=_MODEL,
+        messages=messages,
+        temperature=0.0,
+        max_tokens=512,
+        stream=False,
+    )
+    return resp.choices[0].message.content if resp and resp.choices else ""
+
+
+def _log_prompt_tokens(system_content: str, user_content: str) -> None:
+    """Optional prompt token logging; disabled unless LOG_PROMPT_TOKENS=1."""
+    if os.getenv("LOG_PROMPT_TOKENS", "0").strip() != "1":
+        return
+    tok_dir = os.getenv("CHAT_TOKENIZER_DIR", "").strip()
+    if not tok_dir or not os.path.isdir(tok_dir):
+        return
+    try:
+        tokenizer = transformers.AutoTokenizer.from_pretrained(tok_dir, trust_remote_code=True)
+        total = len(tokenizer.encode(system_content)) + len(tokenizer.encode(user_content))
+        print(f"[tokens] total={total}")
+    except Exception as exc:
+        print(f"[WARN] token counting skipped: {exc}")
+
+
+# ================== Identifier renaming helpers ==================
 _C_LIKE_KEYWORDS = set([
     'auto','break','case','char','const','continue','default','do','double','else','enum','extern','float','for','goto','if','inline','int','long','register','restrict','return','short','signed','sizeof','static','struct','switch','typedef','union','unsigned','void','volatile','while','_Alignas','_Alignof','_Atomic','_Bool','_Complex','_Generic','_Imaginary','_Noreturn','_Static_assert','_Thread_local',
     'class','namespace','public','private','protected','template','typename','using','virtual','operator','new','delete','this','friend','nullptr','bool','wchar_t','char16_t','char32_t','constexpr','mutable','throw','try','catch','reinterpret_cast','static_cast','const_cast','dynamic_cast','typeid','explicit',
@@ -425,8 +495,8 @@ def _is_ident_part(ch: str) -> bool:
 
 def _collect_identifiers_c_like(code: str):
     """
-    极简 C/C++ 风格词法器：跳过注释/字符串/字符字面量，仅在代码段采集标识符 token 及其计数。
-    返回 (id_counts: dict[str,int])。
+    鏋佺畝 C/C++ 椋庢牸璇嶆硶鍣細璺宠繃娉ㄩ噴/瀛楃涓?瀛楃瀛楅潰閲忥紝浠呭湪浠ｇ爜娈甸噰闆嗘爣璇嗙 token 鍙婂叾璁℃暟銆?
+    杩斿洖 (id_counts: dict[str,int])銆?
     """
     i = 0
     n = len(code)
@@ -501,7 +571,7 @@ def _collect_identifiers_c_like(code: str):
 
 def _apply_identifier_mapping(code: str, id_map: dict) -> str:
     """
-    使用相同的极简词法器，仅在代码段（非注释/字符串/字符）且精确 token 匹配时替换。
+    浣跨敤鐩稿悓鐨勬瀬绠€璇嶆硶鍣紝浠呭湪浠ｇ爜娈碉紙闈炴敞閲?瀛楃涓?瀛楃锛変笖绮剧‘ token 鍖归厤鏃舵浛鎹€?
     """
     i = 0
     n = len(code)
@@ -589,11 +659,11 @@ def _generate_new_name_pool(existing: set, seed: int):
     rnd = random.Random(seed)
     pool = list(_RENAME_DICT)
     rnd.shuffle(pool)
-    # 确保不与已存在冲突
+    # 纭繚涓嶄笌宸插瓨鍦ㄥ啿绐?
     for p in list(pool):
         if p in existing:
             pool.remove(p)
-    # 兜底扩展
+    # 鍏滃簳鎵╁睍
     i = 0
     while len(pool) < 256 and i < 1000:
         cand = f"var{i}"
@@ -604,35 +674,35 @@ def _generate_new_name_pool(existing: set, seed: int):
 
 def rename_identifiers_safe(code: str, max_ids: int = 2, seed: int = 42, use_ast: bool = True) -> str:
     """
-    变量重命名函数，优先使用AST方法，失败时降级到词法分析
+    鍙橀噺閲嶅懡鍚嶅嚱鏁帮紝浼樺厛浣跨敤AST鏂规硶锛屽け璐ユ椂闄嶇骇鍒拌瘝娉曞垎鏋?
     
     Args:
-        code: C/C++代码
-        max_ids: 最多改写的变量数
-        seed: 随机种子
-        use_ast: 是否优先尝试AST方法（默认True）
+        code: C/C++浠ｇ爜
+        max_ids: 鏈€澶氭敼鍐欑殑鍙橀噺鏁?
+        seed: 闅忔満绉嶅瓙
+        use_ast: 鏄惁浼樺厛灏濊瘯AST鏂规硶锛堥粯璁rue锛?
     
     Returns:
-        改写后的代码
+        鏀瑰啓鍚庣殑浠ｇ爜
     """
-    # 优先尝试AST方法
+    # 浼樺厛灏濊瘯AST鏂规硶
     if use_ast:
         try:
             from rename_ast import rename_identifiers_ast
             result = rename_identifiers_ast(code, max_ids=max_ids, seed=seed, enable_ast=True)
-            # 如果AST方法成功（返回了不同的代码），使用它
+            # 濡傛灉AST鏂规硶鎴愬姛锛堣繑鍥炰簡涓嶅悓鐨勪唬鐮侊級锛屼娇鐢ㄥ畠
             if result != code:
                 return result
         except Exception:
-            # AST方法失败，降级到词法分析
+            # AST鏂规硶澶辫触锛岄檷绾у埌璇嶆硶鍒嗘瀽
             pass
     
-    # 降级到词法分析方法（使用安全的fallback）
+    # 闄嶇骇鍒拌瘝娉曞垎鏋愭柟娉曪紙浣跨敤瀹夊叏鐨刦allback锛?
     try:
         from retrieval_fallback_safe import rename_identifiers_fallback_safe
         result = rename_identifiers_fallback_safe(code, max_ids=max_ids, seed=seed)
         
-        # 设置fallback模式的重命名映射（用于诊断和日志）
+        # 璁剧疆fallback妯″紡鐨勯噸鍛藉悕鏄犲皠锛堢敤浜庤瘖鏂拰鏃ュ織锛?
         try:
             import rename_ast
             rename_ast.LAST_RENAME_MODE = "fallback"
@@ -641,29 +711,29 @@ def rename_identifiers_safe(code: str, max_ids: int = 2, seed: int = 42, use_ast
         
         return result
     except (ImportError, Exception) as e:
-        # 如果新模块不可用，使用旧的fallback逻辑（不推荐）
+        # 濡傛灉鏂版ā鍧椾笉鍙敤锛屼娇鐢ㄦ棫鐨刦allback閫昏緫锛堜笉鎺ㄨ崘锛?
         print(f"[fallback] Warning: Using legacy fallback (less safe): {e}", flush=True)
-        # 降级到词法分析方法（原有逻辑 - 仅作为最后备选）
+        # 闄嶇骇鍒拌瘝娉曞垎鏋愭柟娉曪紙鍘熸湁閫昏緫 - 浠呬綔涓烘渶鍚庡閫夛級
         counts = _collect_identifiers_c_like(code)
         if not counts:
             return code
-        # 过滤不可改名的"疑似类型/宏"（启发式）：全大写且含下划线；或长度<=1
+        # 杩囨护涓嶅彲鏀瑰悕鐨?鐤戜技绫诲瀷/瀹?锛堝惎鍙戝紡锛夛細鍏ㄥぇ鍐欎笖鍚笅鍒掔嚎锛涙垨闀垮害<=1
         renameables = [ident for ident, c in counts.items() if len(ident) > 1 and not (ident.isupper() and '_' in ident)]
         if not renameables:
             return code
-        # 选择出现次数多的优先
+        # 閫夋嫨鍑虹幇娆℃暟澶氱殑浼樺厛
         renameables.sort(key=lambda x: counts[x], reverse=True)
         picked = renameables[:max(1, max_ids)]
-        # 生成新名
+        # 鐢熸垚鏂板悕
         existing = set(counts.keys())
         pool = _generate_new_name_pool(existing, seed)
         id_map = {}
         pi = 0
         for old in picked:
-            # 跳过已在映射
+            # 璺宠繃宸插湪鏄犲皠
             if old in id_map:
                 continue
-            # 选择一个未冲突的新名
+            # 閫夋嫨涓€涓湭鍐茬獊鐨勬柊鍚?
             while pi < len(pool) and pool[pi] in existing:
                 pi += 1
             if pi >= len(pool):
@@ -675,7 +745,7 @@ def rename_identifiers_safe(code: str, max_ids: int = 2, seed: int = 42, use_ast
             return code
         return _apply_identifier_mapping(code, id_map)
 
-# ================== NO-RAG 候选池（全局随机采样） ==================
+# ================== NO-RAG 鍊欓€夋睜锛堝叏灞€闅忔満閲囨牱锛?==================
 def _build_no_rag_pool(
     exclude_code: str,
     exclude_desc: str,
@@ -685,7 +755,7 @@ def _build_no_rag_pool(
     import random
     rnd = random.Random(seed)
 
-    # 优先使用外部指定 CSV
+    # 浼樺厛浣跨敤澶栭儴鎸囧畾 CSV
     df_pool = None
     csv_path = os.getenv("FALLBACK_NO_RAG_CSV", "")
     if csv_path and os.path.exists(csv_path):
@@ -694,11 +764,11 @@ def _build_no_rag_pool(
         except Exception:
             df_pool = None
 
-    # 其次使用 fallback CSV 加载
+    # 鍏舵浣跨敤 fallback CSV 鍔犺浇
     if df_pool is None:
         df_pool = _load_fallback_df()
 
-    # 最后退化为当前评测 DF（避免抽到自身样本）
+    # 鏈€鍚庨€€鍖栦负褰撳墠璇勬祴 DF锛堥伩鍏嶆娊鍒拌嚜韬牱鏈級
     if df_pool is None:
         df_pool = CURRENT_EVAL_DF
 
@@ -706,12 +776,12 @@ def _build_no_rag_pool(
     if df_pool is None or df_pool.empty:
         return results
 
-    # 规范列名映射
+    # 瑙勮寖鍒楀悕鏄犲皠
     code_col = 'func_before' if 'func_before' in df_pool.columns else ('code' if 'code' in df_pool.columns else None)
     desc_col = 'description' if 'description' in df_pool.columns else None
     sev_col = 'Base Severity' if 'Base Severity' in df_pool.columns else ('base_severity' if 'base_severity' in df_pool.columns else None)
 
-    # 候选索引
+    # 鍊欓€夌储寮?
     idxs = list(range(len(df_pool)))
     rnd.shuffle(idxs)
 
@@ -722,12 +792,12 @@ def _build_no_rag_pool(
         code = str(r.get(code_col, "")) if code_col else ""
         desc = str(r.get(desc_col, "")) if desc_col else ""
 
-        # 跳过与目标完全相同的条目
+        # 璺宠繃涓庣洰鏍囧畬鍏ㄧ浉鍚岀殑鏉＄洰
         if code and desc and code == exclude_code and desc == exclude_desc:
             continue
 
         sev = str(r.get(sev_col, "")).strip().upper() if sev_col else ""
-        # 随机相似度分数以驱动选择器排序
+        # 闅忔満鐩镐技搴﹀垎鏁颁互椹卞姩閫夋嫨鍣ㄦ帓搴?
         sim_score = float(rnd.random())
 
         results.append({
@@ -742,14 +812,14 @@ def _build_no_rag_pool(
             "score": sim_score,
         })
 
-    # 保持按 score 降序
+    # 淇濇寔鎸?score 闄嶅簭
     results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
     return results
 
-# ================== 一次调用LLM（无COT） ==================
+# ================== 涓€娆¤皟鐢↙LM锛堟棤COT锛?==================
 def predict_vuln_level(query_code, query_desc, topk_samples):
     """
-    一轮LLM（无COT）: 根据相似漏洞样本，直接生成目标漏洞的严重等级
+    涓€杞甃LM锛堟棤COT锛? 鏍规嵁鐩镐技婕忔礊鏍锋湰锛岀洿鎺ョ敓鎴愮洰鏍囨紡娲炵殑涓ラ噸绛夌骇
     """
     # Slim prompt mode: only include code, optionally truncated, to reduce payload size
     slim = os.getenv("SLIM_PROMPT", "0").strip() == "1"
@@ -793,47 +863,22 @@ def predict_vuln_level(query_code, query_desc, topk_samples):
         prompt += f"- Description: {query_desc}\n\n"
     # prompt += "Please only output the severity level (LOW, MEDIUM, HIGH, CRITICAL) of the target vulnerability example, without any explanation."
 
-    # 计算token
-    chat_tokenizer_dir = "./deepseek_v3_tokenizer"  # 本地 tokenizer 路径
-    tokenizer = transformers.AutoTokenizer.from_pretrained(chat_tokenizer_dir, trust_remote_code=True)
-    system_content = "You are an expert in code vulnerability assessment, and you will rate the vulnerabilities based on the following scoring criteria:\n0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL."
-    user_content = prompt
-    system_tokens = tokenizer.encode(system_content)
-    user_tokens = tokenizer.encode(user_content)
-    total_tokens = len(system_tokens) + len(user_tokens)
-    print("Total tokens:", total_tokens)
-
+    system_content = (
+        "You are an expert in code vulnerability assessment, and you will rate "
+        "the vulnerabilities based on the following scoring criteria:\n"
+        "0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL."
+    )
+    _log_prompt_tokens(system_content, prompt)
     messages = [
-            {"role": "system",
-             "content": "You are an expert in code vulnerability assessment, and you will rate the vulnerabilities based on the following scoring criteria:\n0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL."},
-            {"role": "user", "content": prompt},
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": prompt},
     ]
-    off = _chat_official(messages)
-    if off is not None:
-        return (off.choices[0].message.content if off and off.choices else "")
-    raw = _chat_raw(messages)
-    if raw is not None:
-        return (raw.choices[0]["message"]["content"] if raw and getattr(raw, "choices", None) else "")
-    # Fallback: use OpenAI client if DeepseekClient is not available
-    if deepseek_client is not None:
-        resp = deepseek_client.chat(messages)
-        return resp.get("text", "")
-    else:
-        # Final fallback: use OpenAI client directly
-        client = OpenAI(api_key=_API_KEY, base_url=_BASE_URL)
-        resp = client.chat.completions.create(
-            model=_MODEL,
-            messages=messages,
-            temperature=0.0,
-            max_tokens=512,
-            stream=False,
-        )
-        return resp.choices[0].message.content if resp and resp.choices else ""
+    return _call_llm(messages)
 
-# ================== 两次调用LLM ==================
+# ================== 涓ゆ璋冪敤LLM ==================
 def generate_explanatory_knowledge(query_code, query_desc, topk_samples):
     """
-    第一轮 LLM：先分析相似漏洞样本，在结合分析直接生成目标漏洞的结构化解释性知识
+    绗竴杞?LLM锛氬厛鍒嗘瀽鐩镐技婕忔礊鏍锋湰锛屽湪缁撳悎鍒嗘瀽鐩存帴鐢熸垚鐩爣婕忔礊鐨勭粨鏋勫寲瑙ｉ噴鎬х煡璇?
     """
     prompt = "Step 1: Analyze the following 5 similar vulnerability examples. For each example, consider:\n"
     prompt += "- Functional semantics of the code\n- Vulnerability causes\n- Official severity (Base Severity) and its rationale\n"
@@ -861,50 +906,19 @@ def generate_explanatory_knowledge(query_code, query_desc, topk_samples):
     prompt += f"- Code: {query_code}\n"
     prompt += f"- Description: {query_desc}\n\n"
 
-    # 计算token
-    chat_tokenizer_dir = "./deepseek_v3_tokenizer"  # 本地 tokenizer 路径
-    tokenizer = transformers.AutoTokenizer.from_pretrained(chat_tokenizer_dir, trust_remote_code=True)
     system_content = "You are an expert in code vulnerability assessment."
-    user_content = prompt
-    system_tokens = tokenizer.encode(system_content)
-    user_tokens = tokenizer.encode(user_content)
-    total_tokens = len(system_tokens) + len(user_tokens)
-    print("Total tokens:", total_tokens)
-
+    _log_prompt_tokens(system_content, prompt)
     messages = [
-            {"role": "system",
-             "content": "You are an expert in code vulnerability assessment."},
-            {"role": "user", "content": prompt}
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": prompt},
     ]
-    off = _chat_official(messages)
-    if off is not None:
-        explanatory_knowledge = off.choices[0].message.content if off and off.choices else ""
-    else:
-        raw = _chat_raw(messages)
-        if raw is not None:
-            explanatory_knowledge = raw.choices[0]["message"]["content"] if raw and getattr(raw, "choices", None) else ""
-        else:
-            # Fallback: use OpenAI client if DeepseekClient is not available
-            if deepseek_client is not None:
-                resp = deepseek_client.chat(messages)
-                explanatory_knowledge = resp.get("text", "")
-            else:
-                # Final fallback: use OpenAI client directly
-                client = OpenAI(api_key=_API_KEY, base_url=_BASE_URL)
-                resp = client.chat.completions.create(
-                    model=_MODEL,
-                    messages=messages,
-                    temperature=0.0,
-                    max_tokens=512,
-                    stream=False,
-                )
-                explanatory_knowledge = resp.choices[0].message.content if resp and resp.choices else ""
+    explanatory_knowledge = _call_llm(messages)
     print(explanatory_knowledge)
     return explanatory_knowledge
 
 def predict_vuln_level_with_knowledge(query_code, query_desc, topk_samples):
     """
-    第二轮 LLM：结合第一轮生成的解释性知识，预测目标漏洞等级
+    绗簩杞?LLM锛氱粨鍚堢涓€杞敓鎴愮殑瑙ｉ噴鎬х煡璇嗭紝棰勬祴鐩爣婕忔礊绛夌骇
     """
     explanatory_knowledge = generate_explanatory_knowledge(query_code, query_desc, topk_samples)
 
@@ -918,54 +932,26 @@ def predict_vuln_level_with_knowledge(query_code, query_desc, topk_samples):
     prompt = "Based on the explanatory knowledge above, determine the severity level of the target vulnerability.\n"
     prompt += "Please only output one of the following: LOW, MEDIUM, HIGH, CRITICAL, without any explanation."
 
-    # 计算token
-    chat_tokenizer_dir = "./deepseek_v3_tokenizer"  # 本地 tokenizer 路径
-    tokenizer = transformers.AutoTokenizer.from_pretrained(chat_tokenizer_dir, trust_remote_code=True)
-    system_content = "You are an expert in code vulnerability assessment, and you will rate the vulnerabilities based on the following scoring criteria:\n0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL."
-    user_content = prompt
-    system_tokens = tokenizer.encode(system_content)
-    user_tokens = tokenizer.encode(user_content)
-    total_tokens = len(system_tokens) + len(user_tokens)
-    print("Total tokens:", total_tokens)
-
+    system_content = (
+        "You are an expert in code vulnerability assessment, and you will rate "
+        "the vulnerabilities based on the following scoring criteria:\n"
+        "0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL."
+    )
+    _log_prompt_tokens(system_content, prompt)
     messages = [
-            {"role": "system",
-             "content": "You are an expert in code vulnerability assessment, and you will rate the vulnerabilities based on the following scoring criteria:\n0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL"},
-            {"role": "user", "content": prompt},
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": prompt},
     ]
-    off = _chat_official(messages)
-    if off is not None:
-        level = off.choices[0].message.content if off and off.choices else ""
-    else:
-        raw = _chat_raw(messages)
-        if raw is not None:
-            level = raw.choices[0]["message"]["content"] if raw and getattr(raw, "choices", None) else ""
-        else:
-            # Fallback: use OpenAI client if DeepseekClient is not available
-            if deepseek_client is not None:
-                resp = deepseek_client.chat(messages)
-                level = resp.get("text", "")
-            else:
-                # Final fallback: use OpenAI client directly
-                client = OpenAI(api_key=_API_KEY, base_url=_BASE_URL)
-                resp = client.chat.completions.create(
-                    model=_MODEL,
-                    messages=messages,
-                    temperature=0.0,
-                    max_tokens=512,
-                    stream=False,
-                )
-                level = resp.choices[0].message.content if resp and resp.choices else ""
-    return level
+    return _call_llm(messages)
 
-# ================== 少样本COT ==================
+# ================== Few-shot CoT ==================
 def predict_vuln_level_fewshot_cot(query_code, query_desc, topk_samples):
     """
-    少样本COT 先分析相似漏洞样本，在结合分析直接生成目标漏洞的结构化解释性知识，最后生成漏洞等级
+    灏戞牱鏈珻OT 鍏堝垎鏋愮浉浼兼紡娲炴牱鏈紝鍦ㄧ粨鍚堝垎鏋愮洿鎺ョ敓鎴愮洰鏍囨紡娲炵殑缁撴瀯鍖栬В閲婃€х煡璇嗭紝鏈€鍚庣敓鎴愭紡娲炵瓑绾?
     """
     prompt = "Your task is to analyze vulnerabilities step by step and finally output only the severity of the target vulnerability.\n\n"
 
-    # Step1: 分析示例
+    # Step1: 鍒嗘瀽绀轰緥
     prompt += "Step 1: Analyze the following several similar vulnerability samples. For each sample, consider:\n"
     prompt += "- Functional semantics of the code\n"
     prompt += "- Vulnerability causes\n"
@@ -988,7 +974,7 @@ def predict_vuln_level_fewshot_cot(query_code, query_desc, topk_samples):
         prompt += f"- NVD Info: {item['nvd_info']}\n"
         prompt += f"- CWE Info: {item['cwe_info']}\n\n"
 
-    # Step2: 分析目标漏洞
+    # Step2: 鍒嗘瀽鐩爣婕忔礊
     prompt += "Step 2: Based on the patterns observed in Step 1, analyze the target vulnerability.\n"
     prompt += "Generate structured explanatory knowledge before deciding severity:\n"
     prompt += "Explanatory Knowledge:\n"
@@ -1005,55 +991,27 @@ def predict_vuln_level_fewshot_cot(query_code, query_desc, topk_samples):
     prompt += f"- Code: {query_code}\n"
     prompt += f"- Description: {query_desc}\n\n"
 
-    # Step3: 输出严重等级（保留新版本的格式要求）
+    # Step3: 杈撳嚭涓ラ噸绛夌骇锛堜繚鐣欐柊鐗堟湰鐨勬牸寮忚姹傦級
     prompt += "Step 3: Based on Step 1 and Step 2, output the severity level of the target vulnerability.\n"
     prompt += "Do not output any explanation, reasoning process, or the severity levels of the previous sample examples.\n"
     prompt += "Output exactly one line in the format:\n"
     prompt += "SEVERITY: <LOW|MEDIUM|HIGH|CRITICAL>\n"
 
-    # 计算 token
-    chat_tokenizer_dir = "./deepseek_v3_tokenizer"  # 本地 tokenizer 路径
-    tokenizer = transformers.AutoTokenizer.from_pretrained(
-        chat_tokenizer_dir, trust_remote_code=True
+    system_content = (
+        "You are an expert in code vulnerability assessment, and you will rate "
+        "the vulnerabilities based on the following scoring criteria:\n"
+        "0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL."
     )
-    system_content = "You are an expert in code vulnerability assessment, and you will rate the vulnerabilities based on the following scoring criteria:\n0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL."
-    system_tokens = tokenizer.encode(system_content)
-    user_tokens = tokenizer.encode(prompt)
-    total_tokens = len(system_tokens) + len(user_tokens)
-    print("Total tokens:", total_tokens)
-
+    _log_prompt_tokens(system_content, prompt)
     messages = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": prompt}
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": prompt},
     ]
-    off = _chat_official(messages)
-    if off is not None:
-        level = off.choices[0].message.content if off and off.choices else ""
-    else:
-        raw = _chat_raw(messages)
-        if raw is not None:
-            level = raw.choices[0]["message"]["content"] if raw and getattr(raw, "choices", None) else ""
-        else:
-            # Fallback: use OpenAI client if DeepseekClient is not available
-            if deepseek_client is not None:
-                resp = deepseek_client.chat(messages)
-                level = resp.get("text", "")
-            else:
-                # Final fallback: use OpenAI client directly
-                client = OpenAI(api_key=_API_KEY, base_url=_BASE_URL)
-                resp = client.chat.completions.create(
-                    model=_MODEL,
-                    messages=messages,
-                    temperature=0.0,
-                    max_tokens=512,
-                    stream=False,
-                )
-                level = resp.choices[0].message.content if resp and resp.choices else ""
-    return level
+    return _call_llm(messages)
 
-# ================== 主调用函数 ==================
+# ================== Legacy standalone runner ==================
 def predict_vuln_level_rag_llm(query_code, query_desc):
-    # 1. RAG 多模态检索 topK 样本
+    # 1. RAG 澶氭ā鎬佹绱?topK 鏍锋湰
     topk_samples = rag_multimodal_search(query_code, query_desc)
 
     # 2. COT
@@ -1073,15 +1031,14 @@ def predict_vuln_level_rag_llm_beam(
     w_sev: float = 0.3,
     diversity_lambda: float = 0.1,
 ) -> str:
-    """RAG 检索出更大候选池或使用 NO_RAG 全局采样，再用策略选择（默认 beam）组合出 k 个示例。"""
-    # PING_ONLY: 极简连通性测试，不构造长提示
+    """Legacy beam runner over a retrieved demonstration pool."""
+    # PING_ONLY: minimal connectivity check without building the full prompt
     try:
         if os.getenv("PING_ONLY", "0").strip() == "1":
-            resp = deepseek_client.chat([
+            return _call_llm([
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": "Hello"},
             ])
-            return resp.get("text", "")
     except Exception:
         pass
     use_no_rag = os.getenv("NO_RAG", "0").strip() == "1"
@@ -1111,20 +1068,7 @@ def predict_vuln_level_rag_llm_beam(
                 pool = rag_multimodal_search(query_code, query_desc, topk=limit, search_factor=fallback_factor, return_limit=limit)
             if pool:
                 break
-    if select_topk is None:
-        demos = pool[:k]
-    else:
-        demos = select_topk(
-            candidates=pool,
-            k=k,
-            strategy=strategy,
-            query_true_sev=true_severity or "",
-            beam_width=beam_width,
-            max_pool=pool_size,
-            w_sim=w_sim,
-            w_sev=w_sev,
-            diversity_lambda=diversity_lambda,
-        )
+    demos = pool[:k]
     # optional debug dump of selected demos
     try:
         if os.getenv("DUMP_DEMOS", "0").strip() == "1":
@@ -1141,7 +1085,7 @@ def predict_vuln_level_rag_llm_beam(
     except Exception:
         pass
 
-    # 可选：对 query / demos 执行标识符重命名（演示攻击）
+    # 鍙€夛細瀵?query / demos 鎵ц鏍囪瘑绗﹂噸鍛藉悕锛堟紨绀烘敾鍑伙級
     try:
         if os.getenv("APPLY_REWRITE", "0").strip() == "1":
             target = os.getenv("REWRITE_TARGET", "demos").strip().lower()  # demos|query|both
@@ -1164,7 +1108,7 @@ def predict_vuln_level_rag_llm_beam(
     except Exception as _e:
         print(f"[REWRITE] skip due to error: {_e}")
 
-    # DRY_RUN: 跳过 LLM，仅输出选样信息
+    # DRY_RUN: 璺宠繃 LLM锛屼粎杈撳嚭閫夋牱淇℃伅
     try:
         if os.getenv("DRY_RUN", "0").strip() == "1":
             print("[DRY_RUN] skip LLM call; selection prepared above.")
@@ -1183,39 +1127,36 @@ def predict_vuln_level_rag_llm_beam(
     return level
 
 
-# ================== 运行 ==================
+# ================== Legacy standalone runner ==================
 if __name__ == "__main__":
-    """
-    运行
-    """
-    # 读取 Excel 文件
+    print(
+        "[WARN] Direct execution of src/retrieval.py is legacy. "
+        "Use scripts/rag_da_reproduce.py for paper reproduction."
+    )
     input_file = os.getenv("INPUT_FILE", "datasets/test/test_all.xlsx")
     output_file = os.getenv("OUTPUT_FILE", "test_all_predicted2.xlsx")
     temp_file = os.getenv("TEMP_FILE", os.path.splitext(output_file)[0] + "_temp.xlsx")
 
-    VALID_LEVELS = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+    valid_levels = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
 
-    # 判断是否已经有预测文件
     if os.path.exists(output_file):
         df = pd.read_excel(output_file)
-        print(f"继续运行：已加载 {output_file}")
+        print(f"[resume] loaded {output_file}")
     else:
         df = pd.read_excel(input_file)
-        df["Predicted"] = ""  # 初始化预测列
-        print(f"新运行：加载 {input_file}")
+        df["Predicted"] = ""
+        print(f"[start] loaded {input_file}")
 
-    # 记录当前评测 DF 以供 NO_RAG 候选池使用
     try:
-        CURRENT_EVAL_DF = df
+        globals()["CURRENT_EVAL_DF"] = df
     except Exception:
         pass
 
-    # 找到 Predicted 不在有效等级集合的行
-    rows_to_predict = df[~df["Predicted"].astype(str).str.strip().isin(VALID_LEVELS)].index
-    # 可选：随机打乱顺序
+    rows_to_predict = df[~df["Predicted"].astype(str).str.strip().isin(valid_levels)].index
     if os.getenv("SHUFFLE_ROWS", "0").strip() == "1":
         try:
             import random
+
             seed = int(os.getenv("SHUFFLE_SEED", "42"))
             rnd = random.Random(seed)
             rows_list = list(rows_to_predict)
@@ -1224,760 +1165,54 @@ if __name__ == "__main__":
         except Exception:
             pass
 
-    # 小范围实验参数
-    STRATEGY = os.getenv("STRATEGY", "beam").strip().lower()
-    # 统一通过 selector 路径，便于 DUMP_DEMOS 与对齐对比
-    USE_BEAM = STRATEGY in ("beam", "adversarial", "baseline")
-    MAX_RUN = int(os.getenv("SMALL_RUN_MAX", "20"))
-    # beam params
-    TOPK_RUN = int(os.getenv("TOPK", str(TOPK)))
-    POOL_SIZE = int(os.getenv("POOL_SIZE", "30"))
-    BEAM_WIDTH = int(os.getenv("BEAM_WIDTH", "8"))
-    W_SIM = float(os.getenv("W_SIM", "0.7"))
-    W_SEV = float(os.getenv("W_SEV", "0.3"))
-    DIVERSITY = float(os.getenv("DIVERSITY_LAMBDA", "0.1"))
+    strategy = os.getenv("STRATEGY", "beam").strip().lower()
+    use_beam = strategy in ("beam", "adversarial", "baseline")
+    max_run = int(os.getenv("SMALL_RUN_MAX", "20"))
+    topk_run = int(os.getenv("TOPK", str(TOPK)))
+    pool_size = int(os.getenv("POOL_SIZE", "30"))
+    beam_width = int(os.getenv("BEAM_WIDTH", "8"))
+    w_sim = float(os.getenv("W_SIM", "0.7"))
+    w_sev = float(os.getenv("W_SEV", "0.3"))
+    diversity = float(os.getenv("DIVERSITY_LAMBDA", "0.1"))
 
     if len(rows_to_predict) == 0:
-        print("所有行都已经预测完成！")
+        print("All rows already have valid predictions.")
     else:
         processed = 0
         for idx in rows_to_predict:
             row = df.loc[idx]
-            query_code = row['func_before']
-            query_desc = row['description']
+            query_code = row["func_before"]
+            query_desc = row["description"]
 
             try:
-                # 预测漏洞等级（通过策略选择器）
-                if USE_BEAM:
-                    true_sev = str(row.get('Base Severity', '')).strip().upper()
+                if use_beam:
+                    true_sev = str(row.get("Base Severity", "")).strip().upper()
                     level = predict_vuln_level_rag_llm_beam(
                         query_code=query_code,
                         query_desc=query_desc,
                         true_severity=true_sev,
-                        k=TOPK_RUN,
-                        pool_size=POOL_SIZE,
-                        strategy=STRATEGY,
-                        beam_width=BEAM_WIDTH,
-                        w_sim=W_SIM,
-                        w_sev=W_SEV,
-                        diversity_lambda=DIVERSITY,
+                        k=topk_run,
+                        pool_size=pool_size,
+                        strategy=strategy,
+                        beam_width=beam_width,
+                        w_sim=w_sim,
+                        w_sev=w_sev,
+                        diversity_lambda=diversity,
                     )
                 else:
                     level = predict_vuln_level_rag_llm(query_code, query_desc)
                 print(f"Row {idx}: {level} (Base Severity: {row['Base Severity']})")
-            except Exception as e:
-                print(f"Error at row {idx}: {e}")
+            except Exception as exc:
+                print(f"Error at row {idx}: {exc}")
                 level = ""
 
-            # 写入预测结果
             df.at[idx, "Predicted"] = level
-
-            # 保存到临时文件，再覆盖
             df.to_excel(temp_file, index=False)
             os.replace(temp_file, output_file)
 
             processed += 1
-            if processed >= MAX_RUN:
-                print(f"小范围实验达到上限 MAX_RUN={MAX_RUN}，提前退出。")
+            if processed >= max_run:
+                print(f"Reached SMALL_RUN_MAX={max_run}, stopping early.")
                 break
 
-        print(f"预测完成，结果已保存到 {output_file}")
-
-def _generate_new_name_pool(existing: set, seed: int):
-    import random
-    rnd = random.Random(seed)
-    pool = list(_RENAME_DICT)
-    rnd.shuffle(pool)
-    # 确保不与已存在冲突
-    for p in list(pool):
-        if p in existing:
-            pool.remove(p)
-    # 兜底扩展
-    i = 0
-    while len(pool) < 256 and i < 1000:
-        cand = f"var{i}"
-        if cand not in existing:
-            pool.append(cand)
-        i += 1
-    return pool
-
-def rename_identifiers_safe(code: str, max_ids: int = 2, seed: int = 42, use_ast: bool = True) -> str:
-    """
-    变量重命名函数，优先使用AST方法，失败时降级到词法分析
-    
-    Args:
-        code: C/C++代码
-        max_ids: 最多改写的变量数
-        seed: 随机种子
-        use_ast: 是否优先尝试AST方法（默认True）
-    
-    Returns:
-        改写后的代码
-    """
-    # 优先尝试AST方法
-    if use_ast:
-        try:
-            from rename_ast import rename_identifiers_ast
-            result = rename_identifiers_ast(code, max_ids=max_ids, seed=seed, enable_ast=True)
-            # 如果AST方法成功（返回了不同的代码），使用它
-            if result != code:
-                return result
-        except Exception:
-            # AST方法失败，降级到词法分析
-            pass
-    
-    # 降级到词法分析方法（使用安全的fallback）
-    try:
-        from retrieval_fallback_safe import rename_identifiers_fallback_safe
-        result = rename_identifiers_fallback_safe(code, max_ids=max_ids, seed=seed)
-        
-        # 设置fallback模式的重命名映射（用于诊断和日志）
-        try:
-            import rename_ast
-            rename_ast.LAST_RENAME_MODE = "fallback"
-        except:
-            pass
-        
-        return result
-    except (ImportError, Exception) as e:
-        # 如果新模块不可用，使用旧的fallback逻辑（不推荐）
-        print(f"[fallback] Warning: Using legacy fallback (less safe): {e}", flush=True)
-        # 降级到词法分析方法（原有逻辑 - 仅作为最后备选）
-        counts = _collect_identifiers_c_like(code)
-        if not counts:
-            return code
-        # 过滤不可改名的"疑似类型/宏"（启发式）：全大写且含下划线；或长度<=1
-        renameables = [ident for ident, c in counts.items() if len(ident) > 1 and not (ident.isupper() and '_' in ident)]
-        if not renameables:
-            return code
-        # 选择出现次数多的优先
-        renameables.sort(key=lambda x: counts[x], reverse=True)
-        picked = renameables[:max(1, max_ids)]
-        # 生成新名
-        existing = set(counts.keys())
-        pool = _generate_new_name_pool(existing, seed)
-        id_map = {}
-        pi = 0
-        for old in picked:
-            # 跳过已在映射
-            if old in id_map:
-                continue
-            # 选择一个未冲突的新名
-            while pi < len(pool) and pool[pi] in existing:
-                pi += 1
-            if pi >= len(pool):
-                break
-            id_map[old] = pool[pi]
-            existing.add(pool[pi])
-            pi += 1
-        if not id_map:
-            return code
-        return _apply_identifier_mapping(code, id_map)
-
-# ================== NO-RAG 候选池（全局随机采样） ==================
-def _build_no_rag_pool(
-    exclude_code: str,
-    exclude_desc: str,
-    pool_size: int,
-    seed: int = 42,
-):
-    import random
-    rnd = random.Random(seed)
-
-    # 优先使用外部指定 CSV
-    df_pool = None
-    csv_path = os.getenv("FALLBACK_NO_RAG_CSV", "")
-    if csv_path and os.path.exists(csv_path):
-        try:
-            df_pool = pd.read_csv(csv_path)
-        except Exception:
-            df_pool = None
-
-    # 其次使用 fallback CSV 加载
-    if df_pool is None:
-        df_pool = _load_fallback_df()
-
-    # 最后退化为当前评测 DF（避免抽到自身样本）
-    if df_pool is None:
-        df_pool = CURRENT_EVAL_DF
-
-    results = []
-    if df_pool is None or df_pool.empty:
-        return results
-
-    # 规范列名映射
-    code_col = 'func_before' if 'func_before' in df_pool.columns else ('code' if 'code' in df_pool.columns else None)
-    desc_col = 'description' if 'description' in df_pool.columns else None
-    sev_col = 'Base Severity' if 'Base Severity' in df_pool.columns else ('base_severity' if 'base_severity' in df_pool.columns else None)
-
-    # 候选索引
-    idxs = list(range(len(df_pool)))
-    rnd.shuffle(idxs)
-
-    for i in idxs:
-        if len(results) >= pool_size:
-            break
-        r = df_pool.iloc[i]
-        code = str(r.get(code_col, "")) if code_col else ""
-        desc = str(r.get(desc_col, "")) if desc_col else ""
-
-        # 跳过与目标完全相同的条目
-        if code and desc and code == exclude_code and desc == exclude_desc:
-            continue
-
-        sev = str(r.get(sev_col, "")).strip().upper() if sev_col else ""
-        # 随机相似度分数以驱动选择器排序
-        sim_score = float(rnd.random())
-
-        results.append({
-            "cve_id": str(r.get("cve_id", "")),
-            "cwe_ids": str(r.get("cwe_ids", "")),
-            "code": code,
-            "description": desc,
-            "base_score": float(r.get("Base Score", r.get("base_score", 0.0)) or 0.0),
-            "base_severity": sev,
-            "nvd_info": str(r.get("nvd_info", "")),
-            "cwe_info": str(r.get("cwe_info", "")),
-            "score": sim_score,
-        })
-
-    # 保持按 score 降序
-    results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
-    return results
-
-# ================== 一次调用LLM（无COT） ==================
-def predict_vuln_level(query_code, query_desc, topk_samples):
-    """
-    一轮LLM（无COT）: 根据相似漏洞样本，直接生成目标漏洞的严重等级
-    """
-    # Slim prompt mode: only include code, optionally truncated, to reduce payload size
-    slim = os.getenv("SLIM_PROMPT", "0").strip() == "1"
-    trunc_chars = 0
-    try:
-        trunc_chars = max(0, int(os.getenv("CODE_TRUNC_CHARS", "0")))
-    except Exception:
-        trunc_chars = 0
-
-    def _maybe_trunc(s: str) -> str:
-        if trunc_chars and len(s) > trunc_chars:
-            return s[:trunc_chars]
-        return s
-
-    prompt = ""
-    if slim:
-        prompt += "Below are a few code snippets. Infer the severity of the target code as one of: LOW, MEDIUM, HIGH, CRITICAL.\n\n"
-        for i, item in enumerate(topk_samples):
-            code_i = _maybe_trunc(str(item.get('code', '') or ''))
-            sev_i = str(item.get('base_severity', '') or '')
-            prompt += f"Sample {i + 1}:\n- Code:\n{code_i}\n- Severity: {sev_i}\n\n"
-        prompt += "Target:\n"
-        prompt += f"- Code:\n{_maybe_trunc(query_code)}\n\n"
-        prompt += "Output only one token among: LOW, MEDIUM, HIGH, CRITICAL."
-    else:
-        prompt += "Below are several similar vulnerability samples with their code, description, and corresponding severity levels. "
-        prompt += "Based on these samples, you will determine the severity of the target vulnerability example. "
-        prompt += "Please only output the severity level of the target vulnerability example without providing any explanations or severity levels of the similar samples.\n\n"
-        for i, item in enumerate(topk_samples):
-            prompt += f"Sample {i + 1}:\n"
-            prompt += f"- CVE ID: {item['cve_id']}\n"
-            prompt += f"- CWE IDs: {item['cwe_ids']}\n"
-            prompt += f"- Base Score: {item['base_score']}\n"
-            prompt += f"- Base Severity: {item['base_severity']}\n"
-            prompt += f"- Code: {item['code']}\n"
-            prompt += f"- Description: {item['description']}\n"
-            prompt += f"- NVD Info: {item['nvd_info']}\n"
-            prompt += f"- CWE Info: {item['cwe_info']}\n\n"
-    prompt += "Target Vulnerability:\n"
-    prompt += f"- Code: {query_code}\n"
-    prompt += f"- Description: {query_desc}\n\n"
-    # prompt += "Please only output the severity level (LOW, MEDIUM, HIGH, CRITICAL) of the target vulnerability example, without any explanation."
-
-    # 计算token
-    chat_tokenizer_dir = "./deepseek_v3_tokenizer"  # 本地 tokenizer 路径
-    tokenizer = transformers.AutoTokenizer.from_pretrained(chat_tokenizer_dir, trust_remote_code=True)
-    system_content = "You are an expert in code vulnerability assessment, and you will rate the vulnerabilities based on the following scoring criteria:\n0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL."
-    user_content = prompt
-    system_tokens = tokenizer.encode(system_content)
-    user_tokens = tokenizer.encode(user_content)
-    total_tokens = len(system_tokens) + len(user_tokens)
-    print("Total tokens:", total_tokens)
-
-    messages = [
-            {"role": "system",
-             "content": "You are an expert in code vulnerability assessment, and you will rate the vulnerabilities based on the following scoring criteria:\n0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL."},
-            {"role": "user", "content": prompt},
-    ]
-    off = _chat_official(messages)
-    if off is not None:
-        return (off.choices[0].message.content if off and off.choices else "")
-    raw = _chat_raw(messages)
-    if raw is not None:
-        return (raw.choices[0]["message"]["content"] if raw and getattr(raw, "choices", None) else "")
-    # Fallback: use OpenAI client if DeepseekClient is not available
-    if deepseek_client is not None:
-        resp = deepseek_client.chat(messages)
-        return resp.get("text", "")
-    else:
-        # Final fallback: use OpenAI client directly
-        client = OpenAI(api_key=_API_KEY, base_url=_BASE_URL)
-        resp = client.chat.completions.create(
-            model=_MODEL,
-            messages=messages,
-            temperature=0.0,
-            max_tokens=512,
-            stream=False,
-        )
-        return resp.choices[0].message.content if resp and resp.choices else ""
-
-# ================== 两次调用LLM ==================
-def generate_explanatory_knowledge(query_code, query_desc, topk_samples):
-    """
-    第一轮 LLM：先分析相似漏洞样本，在结合分析直接生成目标漏洞的结构化解释性知识
-    """
-    prompt = "Step 1: Analyze the following 5 similar vulnerability examples. For each example, consider:\n"
-    prompt += "- Functional semantics of the code\n- Vulnerability causes\n- Official severity (Base Severity) and its rationale\n"
-    prompt += "- NVD/CWE descriptions for context\n- Possible fixing solutions\n\n"
-
-    for i, item in enumerate(topk_samples):
-        prompt += f"Sample {i + 1}:\n"
-        prompt += f"- CVE ID: {item['cve_id']}\n"
-        prompt += f"- CWE IDs: {item['cwe_ids']}\n"
-        prompt += f"- Base Score: {item['base_score']}\n"
-        prompt += f"- Base Severity: {item['base_severity']}\n"
-        prompt += f"- Code: {item['code']}\n"
-        prompt += f"- Description: {item['description']}\n"
-        prompt += f"- NVD Info: {item['nvd_info']}\n"
-        prompt += f"- CWE Info: {item['cwe_info']}\n\n"
-
-    prompt += "Step 2: Based on the patterns, severity reasoning, functional semantics, and fixes observed in the above examples,\n"
-    prompt += "analyze the target vulnerability below and generate **structured explanatory knowledge** in the following format:\n\n"
-    prompt += "Explanatory Knowledge:\n"
-    prompt += "1. Functional Semantics: [...]\n"
-    prompt += "2. Vulnerability Causes: [...]\n"
-    prompt += "3. Fixing Solutions: [...]\n\n"
-
-    prompt += "Target Vulnerability:\n"
-    prompt += f"- Code: {query_code}\n"
-    prompt += f"- Description: {query_desc}\n\n"
-
-    # 计算token
-    chat_tokenizer_dir = "./deepseek_v3_tokenizer"  # 本地 tokenizer 路径
-    tokenizer = transformers.AutoTokenizer.from_pretrained(chat_tokenizer_dir, trust_remote_code=True)
-    system_content = "You are an expert in code vulnerability assessment."
-    user_content = prompt
-    system_tokens = tokenizer.encode(system_content)
-    user_tokens = tokenizer.encode(user_content)
-    total_tokens = len(system_tokens) + len(user_tokens)
-    print("Total tokens:", total_tokens)
-
-    messages = [
-            {"role": "system",
-             "content": "You are an expert in code vulnerability assessment."},
-            {"role": "user", "content": prompt}
-    ]
-    off = _chat_official(messages)
-    if off is not None:
-        explanatory_knowledge = off.choices[0].message.content if off and off.choices else ""
-    else:
-        raw = _chat_raw(messages)
-        if raw is not None:
-            explanatory_knowledge = raw.choices[0]["message"]["content"] if raw and getattr(raw, "choices", None) else ""
-        else:
-            # Fallback: use OpenAI client if DeepseekClient is not available
-            if deepseek_client is not None:
-                resp = deepseek_client.chat(messages)
-                explanatory_knowledge = resp.get("text", "")
-            else:
-                # Final fallback: use OpenAI client directly
-                client = OpenAI(api_key=_API_KEY, base_url=_BASE_URL)
-                resp = client.chat.completions.create(
-                    model=_MODEL,
-                    messages=messages,
-                    temperature=0.0,
-                    max_tokens=512,
-                    stream=False,
-                )
-                explanatory_knowledge = resp.choices[0].message.content if resp and resp.choices else ""
-    print(explanatory_knowledge)
-    return explanatory_knowledge
-
-def predict_vuln_level_with_knowledge(query_code, query_desc, topk_samples):
-    """
-    第二轮 LLM：结合第一轮生成的解释性知识，预测目标漏洞等级
-    """
-    explanatory_knowledge = generate_explanatory_knowledge(query_code, query_desc, topk_samples)
-
-    prompt = "Below is explanatory knowledge extracted from similar vulnerabilities:\n"
-    prompt += f"{explanatory_knowledge}\n\n"
-
-    prompt += "Target Vulnerability:\n"
-    prompt += f"- Code: {query_code}\n"
-    prompt += f"- Description: {query_desc}\n\n"
-
-    prompt = "Based on the explanatory knowledge above, determine the severity level of the target vulnerability.\n"
-    prompt += "Please only output one of the following: LOW, MEDIUM, HIGH, CRITICAL, without any explanation."
-
-    # 计算token
-    chat_tokenizer_dir = "./deepseek_v3_tokenizer"  # 本地 tokenizer 路径
-    tokenizer = transformers.AutoTokenizer.from_pretrained(chat_tokenizer_dir, trust_remote_code=True)
-    system_content = "You are an expert in code vulnerability assessment, and you will rate the vulnerabilities based on the following scoring criteria:\n0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL."
-    user_content = prompt
-    system_tokens = tokenizer.encode(system_content)
-    user_tokens = tokenizer.encode(user_content)
-    total_tokens = len(system_tokens) + len(user_tokens)
-    print("Total tokens:", total_tokens)
-
-    messages = [
-            {"role": "system",
-             "content": "You are an expert in code vulnerability assessment, and you will rate the vulnerabilities based on the following scoring criteria:\n0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL"},
-            {"role": "user", "content": prompt},
-    ]
-    off = _chat_official(messages)
-    if off is not None:
-        level = off.choices[0].message.content if off and off.choices else ""
-    else:
-        raw = _chat_raw(messages)
-        if raw is not None:
-            level = raw.choices[0]["message"]["content"] if raw and getattr(raw, "choices", None) else ""
-        else:
-            # Fallback: use OpenAI client if DeepseekClient is not available
-            if deepseek_client is not None:
-                resp = deepseek_client.chat(messages)
-                level = resp.get("text", "")
-            else:
-                # Final fallback: use OpenAI client directly
-                client = OpenAI(api_key=_API_KEY, base_url=_BASE_URL)
-                resp = client.chat.completions.create(
-                    model=_MODEL,
-                    messages=messages,
-                    temperature=0.0,
-                    max_tokens=512,
-                    stream=False,
-                )
-                level = resp.choices[0].message.content if resp and resp.choices else ""
-    return level
-
-# ================== 少样本COT ==================
-def predict_vuln_level_fewshot_cot(query_code, query_desc, topk_samples):
-    """
-    少样本COT 先分析相似漏洞样本，在结合分析直接生成目标漏洞的结构化解释性知识，最后生成漏洞等级
-    """
-    prompt = "Your task is to analyze vulnerabilities step by step and finally output only the severity of the target vulnerability.\n\n"
-
-    # Step1: 分析示例
-    prompt += "Step 1: Analyze the following several similar vulnerability samples. For each sample, consider:\n"
-    prompt += "- Functional semantics of the code\n"
-    prompt += "- Vulnerability causes\n"
-    prompt += "- Fixing solutions\n"
-    prompt += "- Impact scope (affected modules, attack surface)\n"
-    prompt += "- Exploitability (attack vector, authentication, preconditions)\n"
-    prompt += "- Impact type (confidentiality, integrity, availability, privilege escalation, RCE, data leak)\n"
-    prompt += "- Security context (required privileges, privilege level gained)\n"
-    prompt += "- Severity mapping clues (why it was classified as LOW, MEDIUM, HIGH, or CRITICAL)\n"
-    prompt += "- Official severity (Base Severity)\n\n"
-
-
-    for i, item in enumerate(topk_samples):
-        prompt += f"Sample {i + 1}:\n"
-        prompt += f"- CVE ID: {item['cve_id']}\n"
-        prompt += f"- CWE IDs: {item['cwe_ids']}\n"
-        prompt += f"- Base Score: {item['base_score']}\n"
-        prompt += f"- Base Severity: {item['base_severity']}\n"
-        prompt += f"- Code: {item['code']}\n"
-        prompt += f"- Description: {item['description']}\n"
-        prompt += f"- NVD Info: {item['nvd_info']}\n"
-        prompt += f"- CWE Info: {item['cwe_info']}\n\n"
-        # prompt += f"- Similarity Score: {item['score']}\n\n"
-
-    # Step2: 分析目标漏洞
-    prompt += "Step 2: Based on the patterns observed in Step 1, analyze the target vulnerability.\n"
-    prompt += "Generate structured explanatory knowledge before deciding severity:\n"
-    prompt += "Explanatory Knowledge:\n"
-    prompt += "1. Functional Semantics: [...]\n"
-    prompt += "2. Vulnerability Causes: [...]\n"
-    prompt += "3. Fixing Solutions: [...]\n\n"
-    prompt += "4. Impact Scope: [Affected components/modules, size of attack surface]\n"
-    prompt += "5. Exploitability: [Attack vector, authentication required, preconditions]\n"
-    prompt += "6. Impact Type: [Confidentiality, Integrity, Availability, privilege escalation, RCE, data leak]\n"
-    prompt += "7. Security Context: [Required privileges for exploitation, privilege level gained]\n"
-    prompt += "8. Severity Mapping Clues: [Summarize why similar cases were rated at certain severity levels]\n\n"
-
-    prompt += "Target Vulnerability:\n"
-    prompt += f"- Code: {query_code}\n"
-    prompt += f"- Description: {query_desc}\n\n"
-
-    # Step3: 输出严重等级
-    prompt += "Step 3: Based on Step 1 and Step 2, You only need to output the severity level of the target vulnerability.\n"
-    prompt += "Do not output any explanation, reasoning process, or the severity levels of the previous sample examples.\n"
-
-    # 计算token
-    chat_tokenizer_dir = "./deepseek_v3_tokenizer"  # 本地 tokenizer 路径
-    tokenizer = transformers.AutoTokenizer.from_pretrained(chat_tokenizer_dir, trust_remote_code=True)
-    system_content = "You are an expert in code vulnerability assessment, and you will rate the vulnerabilities based on the following scoring criteria:\n0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL."
-    user_content = prompt
-    system_tokens = tokenizer.encode(system_content)
-    user_tokens = tokenizer.encode(user_content)
-    total_tokens = len(system_tokens) + len(user_tokens)
-    print("Total tokens:", total_tokens)
-
-    messages = [
-            {"role": "system", "content": "You are an expert in code vulnerability assessment, and you will rate the vulnerabilities based on the following scoring criteria:\n0.1-3.9: LOW, 4.0-6.9: MEDIUM, 7.0-8.9: HIGH, 9.0-10.0: CRITICAL."},
-            {"role": "user", "content": prompt}
-    ]
-    off = _chat_official(messages)
-    if off is not None:
-        level = off.choices[0].message.content if off and off.choices else ""
-    else:
-        raw = _chat_raw(messages)
-        if raw is not None:
-            level = raw.choices[0]["message"]["content"] if raw and getattr(raw, "choices", None) else ""
-        else:
-            # Fallback: use OpenAI client if DeepseekClient is not available
-            if deepseek_client is not None:
-                resp = deepseek_client.chat(messages)
-                level = resp.get("text", "")
-            else:
-                # Final fallback: use OpenAI client directly
-                client = OpenAI(api_key=_API_KEY, base_url=_BASE_URL)
-                resp = client.chat.completions.create(
-                    model=_MODEL,
-                    messages=messages,
-                    temperature=0.0,
-                    max_tokens=512,
-                    stream=False,
-                )
-                level = resp.choices[0].message.content if resp and resp.choices else ""
-    return level
-
-# ================== 主调用函数 ==================
-def predict_vuln_level_rag_llm(query_code, query_desc):
-    # 1. RAG 多模态检索 topK 样本
-    topk_samples = rag_multimodal_search(query_code, query_desc)
-
-    # 2. COT
-    level = predict_vuln_level_fewshot_cot(query_code, query_desc, topk_samples)
-    return level
-
-
-def predict_vuln_level_rag_llm_beam(
-    query_code: str,
-    query_desc: str,
-    true_severity: str,
-    k: int = TOPK,
-    pool_size: int = 30,
-    strategy: str = "beam",
-    beam_width: int = 8,
-    w_sim: float = 0.7,
-    w_sev: float = 0.3,
-    diversity_lambda: float = 0.1,
-) -> str:
-    """RAG 检索出更大候选池或使用 NO_RAG 全局采样，再用策略选择（默认 beam）组合出 k 个示例。"""
-    # PING_ONLY: 极简连通性测试，不构造长提示
-    try:
-        if os.getenv("PING_ONLY", "0").strip() == "1":
-            resp = deepseek_client.chat([
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "Hello"},
-            ])
-            return resp.get("text", "")
-    except Exception:
-        pass
-    use_no_rag = os.getenv("NO_RAG", "0").strip() == "1"
-    if use_no_rag:
-        try:
-            seed = int(os.getenv("NO_RAG_SEED", os.getenv("SHUFFLE_SEED", "42")))
-        except Exception:
-            seed = 42
-        pool = _build_no_rag_pool(query_code, query_desc, pool_size, seed)
-    else:
-        pool = rag_multimodal_search(query_code, query_desc, topk=pool_size, search_factor=int(os.getenv("RAG_SEARCH_FACTOR", "4")), return_limit=pool_size)
-    if not pool:
-        # fallback tier 1: increase search factor
-        fallback_factor = 8
-        print(f"[WARN] empty pool with topk={pool_size}, retry with search_factor={fallback_factor}")
-        if use_no_rag:
-            pool = _build_no_rag_pool(query_code, query_desc, pool_size, seed)
-        else:
-            pool = rag_multimodal_search(query_code, query_desc, topk=pool_size, search_factor=fallback_factor, return_limit=pool_size)
-    if not pool:
-        # fallback tier 2: shrink return limit
-        for limit in (20, 10, 5):
-            print(f"[WARN] still empty, retry with return_limit={limit}")
-            if use_no_rag:
-                pool = _build_no_rag_pool(query_code, query_desc, limit, seed)
-            else:
-                pool = rag_multimodal_search(query_code, query_desc, topk=limit, search_factor=fallback_factor, return_limit=limit)
-            if pool:
-                break
-    if select_topk is None:
-        demos = pool[:k]
-    else:
-        demos = select_topk(
-            candidates=pool,
-            k=k,
-            strategy=strategy,
-            query_true_sev=true_severity or "",
-            beam_width=beam_width,
-            max_pool=pool_size,
-            w_sim=w_sim,
-            w_sev=w_sev,
-            diversity_lambda=diversity_lambda,
-        )
-    # optional debug dump of selected demos
-    try:
-        if os.getenv("DUMP_DEMOS", "0").strip() == "1":
-            print(f"[DUMP_DEMOS] strategy={strategy} k={k} pool_size={pool_size} beam_width={beam_width} w_sim={w_sim} w_sev={w_sev} div={diversity_lambda}")
-            print(f"[DUMP_DEMOS] selected_count={len(demos)}")
-            cves = []
-            for i, d in enumerate(demos):
-                cves.append(str(d.get('cve_id','')))
-                print(f"  demo[{i}] CVE={d.get('cve_id','')} sev={d.get('base_severity','')} score={d.get('score',0):.4f} cwe={d.get('cwe_ids','')}")
-            try:
-                print(f"[DUMP_DEMOS] CVE_LIST={','.join(cves)}")
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    # 可选：对 query / demos 执行标识符重命名（演示攻击）
-    try:
-        if os.getenv("APPLY_REWRITE", "0").strip() == "1":
-            target = os.getenv("REWRITE_TARGET", "demos").strip().lower()  # demos|query|both
-            max_ids = int(os.getenv("REWRITE_MAX_IDS", "3"))
-            seed = int(os.getenv("REWRITE_SEED", os.getenv("SHUFFLE_SEED", "42")))
-            if target in ("query", "both"):
-                query_code = rename_identifiers_safe(query_code, max_ids=max_ids, seed=seed)
-            if target in ("demos", "both"):
-                new_demos = []
-                for d in demos:
-                    d2 = dict(d)
-                    try:
-                        d2['code'] = rename_identifiers_safe(d2.get('code', '') or '', max_ids=max_ids, seed=seed)
-                    except Exception:
-                        pass
-                    new_demos.append(d2)
-                demos = new_demos
-            if os.getenv("DUMP_DEMOS", "0").strip() == "1":
-                print(f"[REWRITE] applied identifier renaming: target={target} max_ids={max_ids} seed={seed}")
-    except Exception as _e:
-        print(f"[REWRITE] skip due to error: {_e}")
-
-    # DRY_RUN: 跳过 LLM，仅输出选样信息
-    try:
-        if os.getenv("DRY_RUN", "0").strip() == "1":
-            print("[DRY_RUN] skip LLM call; selection prepared above.")
-            return ""
-    except Exception:
-        pass
-
-    # Choose inference mode: simple vs CoT
-    try:
-        if os.getenv("INFER_SIMPLE", "0").strip() == "1":
-            level = predict_vuln_level(query_code, query_desc, demos)
-        else:
-            level = predict_vuln_level_fewshot_cot(query_code, query_desc, demos)
-    except Exception:
-        level = predict_vuln_level_fewshot_cot(query_code, query_desc, demos)
-    return level
-
-
-# ================== 运行 ==================
-if __name__ == "__main__":
-    """
-    运行
-    """
-    # 读取 Excel 文件
-    input_file = os.getenv("INPUT_FILE", "datasets/test/test_all.xlsx")
-    output_file = os.getenv("OUTPUT_FILE", "test_all_predicted2.xlsx")
-    temp_file = os.getenv("TEMP_FILE", os.path.splitext(output_file)[0] + "_temp.xlsx")
-
-    VALID_LEVELS = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
-
-    # 判断是否已经有预测文件
-    if os.path.exists(output_file):
-        df = pd.read_excel(output_file)
-        print(f"继续运行：已加载 {output_file}")
-    else:
-        df = pd.read_excel(input_file)
-        df["Predicted"] = ""  # 初始化预测列
-        print(f"新运行：加载 {input_file}")
-
-    # 记录当前评测 DF 以供 NO_RAG 候选池使用
-    try:
-        CURRENT_EVAL_DF = df
-    except Exception:
-        pass
-
-    # 找到 Predicted 不在有效等级集合的行
-    rows_to_predict = df[~df["Predicted"].astype(str).str.strip().isin(VALID_LEVELS)].index
-    # 可选：随机打乱顺序
-    if os.getenv("SHUFFLE_ROWS", "0").strip() == "1":
-        try:
-            import random
-            seed = int(os.getenv("SHUFFLE_SEED", "42"))
-            rnd = random.Random(seed)
-            rows_list = list(rows_to_predict)
-            rnd.shuffle(rows_list)
-            rows_to_predict = rows_list
-        except Exception:
-            pass
-
-    # 小范围实验参数
-    STRATEGY = os.getenv("STRATEGY", "beam").strip().lower()
-    # 统一通过 selector 路径，便于 DUMP_DEMOS 与对齐对比
-    USE_BEAM = STRATEGY in ("beam", "adversarial", "baseline")
-    MAX_RUN = int(os.getenv("SMALL_RUN_MAX", "20"))
-    # beam params
-    TOPK_RUN = int(os.getenv("TOPK", str(TOPK)))
-    POOL_SIZE = int(os.getenv("POOL_SIZE", "30"))
-    BEAM_WIDTH = int(os.getenv("BEAM_WIDTH", "8"))
-    W_SIM = float(os.getenv("W_SIM", "0.7"))
-    W_SEV = float(os.getenv("W_SEV", "0.3"))
-    DIVERSITY = float(os.getenv("DIVERSITY_LAMBDA", "0.1"))
-
-    if len(rows_to_predict) == 0:
-        print("所有行都已经预测完成！")
-    else:
-        processed = 0
-        for idx in rows_to_predict:
-            row = df.loc[idx]
-            query_code = row['func_before']
-            query_desc = row['description']
-
-            try:
-                # 预测漏洞等级（通过策略选择器）
-                if USE_BEAM:
-                    true_sev = str(row.get('Base Severity', '')).strip().upper()
-                    level = predict_vuln_level_rag_llm_beam(
-                        query_code=query_code,
-                        query_desc=query_desc,
-                        true_severity=true_sev,
-                        k=TOPK_RUN,
-                        pool_size=POOL_SIZE,
-                        strategy=STRATEGY,
-                        beam_width=BEAM_WIDTH,
-                        w_sim=W_SIM,
-                        w_sev=W_SEV,
-                        diversity_lambda=DIVERSITY,
-                    )
-                else:
-                    level = predict_vuln_level_rag_llm(query_code, query_desc)
-                print(f"Row {idx}: {level} (Base Severity: {row['Base Severity']})")
-            except Exception as e:
-                print(f"Error at row {idx}: {e}")
-                level = ""
-
-            # 写入预测结果
-            df.at[idx, "Predicted"] = level
-
-            # 保存到临时文件，再覆盖
-            df.to_excel(temp_file, index=False)
-            os.replace(temp_file, output_file)
-
-            processed += 1
-            if processed >= MAX_RUN:
-                print(f"小范围实验达到上限 MAX_RUN={MAX_RUN}，提前退出。")
-                break
-
-        print(f"预测完成，结果已保存到 {output_file}")
-
+        print(f"Predictions saved to {output_file}")

@@ -1,28 +1,36 @@
 # RAG-DA: Retrieval-Augmented Demonstration Attack for SVA
 
-This repository contains the code and experiment artifacts for the
-Retrieval-Augmented Demonstration Attack (RAG-DA) study on software
-vulnerability assessment (SVA).  RAG-DA studies the security of
-retrieval-augmented SVA pipelines by manipulating only the retrieved
-demonstrations, while keeping the user query, retriever, prompt template, and
-model parameters unchanged.
+![RAG-DA Framework](framework.png)
 
-The original ReVul-CoT codebase is retained because the paper builds on its
-RAG-SVA pipeline.  The repository is organized around a small runnable example,
-a canonical reproduction path, and the experiment artifacts used for the paper.
+This repository contains the public code artifact for the Retrieval-Augmented
+Demonstration Attack (RAG-DA) study on software vulnerability assessment (SVA).
+RAG-DA evaluates the security of retrieval-augmented SVA pipelines by manipulating
+only the retrieved demonstrations, while keeping the user query, retriever,
+prompt template, and model parameters unchanged.
 
-![RAG-DA framework](framework.png)
+## Official Reproduction Path
+
+Use **only** these entry points to reproduce the paper numbers:
+
+| Step | Command / file |
+| --- | --- |
+| Smoke test (no data, no API) | `python examples/rag-da-example.py` |
+| Full clean / attack runs | `python scripts/rag_da_reproduce.py` |
+| Paper-aligned hyperparameters | `configs/vuln_beam_best.yaml` |
+| Attack core | `src/rag_da.py` |
+| Retrieval + prompting + LLM | `src/retrieval.py` |
+| Metrics | `python scripts/compute_metrics.py --predictions <attack.xlsx> --clean <clean.xlsx>` |
+
+Legacy development scripts, private dataset-prep notebooks, and internal experiment
+trees are intentionally **not** included in this public repository.
 
 ## Quick Start
-
-Run the minimal example first:
 
 ```powershell
 uv run --python 3.12.10 python examples/rag-da-example.py
 ```
 
-If Python and the dependencies are already installed, the plain command also
-works:
+Or, with dependencies already installed:
 
 ```powershell
 python examples/rag-da-example.py
@@ -30,81 +38,54 @@ python examples/rag-da-example.py
 
 Expected behavior:
 
-- the script imports `rag_da` successfully;
-- it prints two toy CVE demonstrations;
+- `rag_da` imports successfully;
+- two toy CVE demonstrations are printed;
 - each example reports `Edited: 1`, showing that RAG-DA selected an identifier
   rename instead of returning the original code.
 
-This smoke test does not require the full MegaVul/BigVul data, FAISS indexes,
-PostgreSQL, or model API credentials.
+This smoke test does not require MegaVul/BigVul data, FAISS indexes, PostgreSQL,
+or model API credentials.
 
 ## Repository Map
-
-The main files for RAG-DA are:
 
 | Purpose | File |
 | --- | --- |
 | Core RAG-DA attack module | `src/rag_da.py` |
-| Backward-compatible script wrapper | `src/rag-da.py` |
 | Minimal runnable example | `examples/rag-da-example.py` |
-| Clean/attack reproduction runner | `scripts/rag_da_reproduce.py` |
+| Canonical clean/attack runner | `scripts/rag_da_reproduce.py` |
+| Metric CLI | `scripts/compute_metrics.py` |
 | Retrieval, prompt construction, and LLM calls | `src/retrieval.py` |
-| Metric helpers | `src/rag-da-metrics.py`, `src/evaluation.py` |
-| Detailed RAG-DA API notes | `README-rag-da.md` |
+| Metric primitives | `src/rag_da_metrics.py` |
+| Paper-aligned beam config | `configs/vuln_beam_best.yaml` |
+| API notes | `README-rag-da.md` |
 | Full reproduction guide | `docs/REPRODUCIBILITY.md` |
-| Paper-table artifact map | `docs/EXPERIMENT_MANIFEST.md` |
-
-For new runs, start from `src/rag_da.py` and `scripts/rag_da_reproduce.py`.  The
-public repository intentionally omits paper-development scratch files and
-historical sweep outputs that are not required to reproduce the RAG-DA method.
 
 ## What RAG-DA Does
-
-RAG-DA attacks the retrieved demonstrations in a RAG-based SVA system while
-leaving the user query, retriever, prompt template, and model weights
-unchanged.  The implementation follows the paper method:
 
 1. retrieve candidate demonstrations for a query vulnerability;
 2. localize renamable identifiers in retrieved code snippets;
 3. generate semantics-preserving identifier-renaming variants;
-4. select one variant per demonstration with a variant-first beam search;
+4. select one variant per demonstration with variant-first beam search;
 5. send the resulting demonstration set to the same downstream SVA prompt.
 
-The current `src/rag_da.py` uses token-level normalized Levenshtein distance and
-supports recomputing retrieval similarity after renaming through
-`variant_score_fn`, matching the paper's variant-selection objective.
+The public `src/rag_da.py` uses token-level normalized Levenshtein distance and
+supports recomputing retrieval similarity after renaming through `variant_score_fn`.
 
 ## Full Reproduction
-
-Install the full-pipeline dependencies:
 
 ```powershell
 pip install -r requirements/requirements.txt
 ```
 
-Configure a model backend with environment variables.  Example:
+Configure a model backend with environment variables:
 
 ```powershell
 $env:DEEPSEEK_API_KEY = "<api key>"
-$env:DEEPSEEK_BASE_URL = "https://api.siliconflow.cn/v1"
+$env:DEEPSEEK_BASE_URL = "https://api.example.com/v1"
 $env:DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-V3.2"
 ```
 
-The retrieval and embedding defaults can also be overridden without editing
-source files:
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `CODE_EMBEDDING_MODEL` | `microsoft/codebert-base` | Code embedding model used for FAISS-style retrieval |
-| `DESC_EMBEDDING_MODEL` | `shibing624/text2vec-base-multilingual` | Description embedding model |
-| `EMBED_MAX_LENGTH` | `256` | Maximum token length for embedding inputs |
-| `EMBED_POOLING` | `first_last_avg` | Embedding pooling strategy |
-| `RAG_ALPHA` | script-specific default | Code-similarity weight |
-| `RAG_BETA` | script-specific default | Description-similarity weight |
-| `TOPK` | `5` | Number of demonstrations |
-| `CHAT_TOKENIZER_DIR` | `./deepseek_v3_tokenizer` | Tokenizer path used by `src/tokens.py` |
-
-Then run the canonical clean baseline:
+MegaVul clean baseline:
 
 ```powershell
 $env:INPUT_FILE = "datasets/test/test_all.xlsx"
@@ -112,7 +93,7 @@ $env:OUTPUT_FILE = "result2/reproduce/megavul_clean.xlsx"
 python scripts/rag_da_reproduce.py --mode clean
 ```
 
-Run the RAG-DA attack:
+RAG-DA attack:
 
 ```powershell
 $env:INPUT_FILE = "datasets/test/test_all.xlsx"
@@ -120,18 +101,16 @@ $env:OUTPUT_FILE = "result2/reproduce/megavul_attack.xlsx"
 python scripts/rag_da_reproduce.py --mode attack --recompute-variant-similarity
 ```
 
-For BigVul zero-transfer, set:
+BigVul zero-transfer:
 
 ```powershell
 $env:INPUT_FILE = "datasets/bigvul_hf/test_subset_1208_no_overlap.xlsx"
 $env:TRAIN_FILE = "datasets/train/train_all.xlsx"
 ```
 
-More commands and options are documented in `docs/REPRODUCIBILITY.md`.
+More commands are documented in `docs/REPRODUCIBILITY.md`.
 
 ## Data and Indexes
-
-The full experiments expect these local artifacts:
 
 | Artifact | Expected path |
 | --- | --- |
@@ -143,15 +122,11 @@ The full experiments expect these local artifacts:
 | FAISS row map | `faiss/id_map.json` |
 | CSV fallback knowledge base | `datasets/megavul_simple_cpp_success_getast.csv` |
 
-`src/retrieval.py` treats PostgreSQL as optional.  If the database is unavailable,
-the runner falls back to the CSV knowledge base when possible.
-
-Some benchmark datasets are large or have redistribution constraints.  See
-`datasets/README.md` for public release guidance and expected local paths.
+`src/retrieval.py` treats PostgreSQL as optional and falls back to the CSV
+knowledge base when the database is unavailable.  FAISS indexes are loaded lazily
+so the smoke test can import the module without local indexes.
 
 ## Model Backends
-
-The model labels used by the release are:
 
 | Model label | Release model string |
 | --- | --- |
@@ -160,32 +135,20 @@ The model labels used by the release are:
 | GPT-5.1 | `gpt-5.1` |
 | Grok-4.1-Fast | `x-ai/grok-4.1-fast:free` |
 
-The release scripts use OpenAI-compatible backend adapters for convenience.
-The RAG-DA attack, retrieval, prompt construction, and evaluation logic are
-independent of whether the model is served locally or through a compatible
-endpoint.  API keys are read from environment variables and should never be
-committed.
+API keys are read from environment variables and must never be committed.
 
 ## Experiment Artifacts
 
-The GitHub repository is intentionally code-first.  Raw datasets, FAISS indexes,
-full prediction workbooks, prompt/response traces, and paper figures are not
-committed to the main branch.  Place downloaded or archived result files under
-the paths documented in `docs/EXPERIMENT_MANIFEST.md` if you want to recompute paper
-tables locally.
-
-Use `docs/ARTIFACT_RELEASE.md` for the recommended release policy and
-`result2/README.md` for the expected location of generated result files.
+Raw datasets, FAISS indexes, full prediction workbooks, and paper figures are not
+committed to the main branch.  See `docs/EXPERIMENT_MANIFEST.md` and
+`docs/ARTIFACT_RELEASE.md` for the expected local layout when verifying tables
+from cached predictions.
 
 ## Security and Release Hygiene
-
-Before uploading a public artifact, run:
 
 ```powershell
 Select-String -Path (Get-ChildItem -Recurse -Include *.ps1,*.py,*.md -File).FullName -Pattern 'sk-[A-Za-z0-9_-]+'
 ```
 
-The public scripts use environment-variable placeholders such as
-`YOUR_QWEN_API_KEY_1`.  Do not commit real model credentials.  For
-reproducibility, record the model string, backend configuration, decoding
-settings, and artifact paths used for each run.
+Do not commit real model credentials.  Record the model string, backend
+configuration, decoding settings, and artifact paths used for each run.
