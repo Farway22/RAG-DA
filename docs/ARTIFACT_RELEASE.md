@@ -33,7 +33,7 @@ of them makes the repository slow to clone and review.
 Commit to git:
 
 - source code and scripts;
-- README and reproduction documentation;
+- README and run documentation;
 - small sample data;
 - table-level summaries such as compact `.json`, `.md`, or small `.xlsx`
   files;
@@ -60,11 +60,11 @@ file size is appropriate for git.
 
 ## Suggested Result Policy
 
-Keep enough external result files to make the paper tables traceable:
+Optional external bundles may include:
 
 - compact metric summaries, such as `result2/bigvul_results_metrics.json`;
-- final prediction workbooks used for reported numbers;
-- `docs/EXPERIMENT_MANIFEST.md`, which maps result files to paper sections.
+- prediction workbooks used in our evaluation;
+- `docs/EXPERIMENT_MANIFEST.md`, which maps paths to experiment sections.
 
 Avoid committing generated logs such as `*_run.log` and large intermediate
 `*_demos_full.jsonl` files unless they are necessary for a specific archival

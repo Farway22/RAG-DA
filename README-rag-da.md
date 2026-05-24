@@ -1,14 +1,15 @@
 # RAG-DA: Retrieval-Augmented Demonstration Attack
 
-Public release layout for reproducing clean and attacked RAG-SVA predictions.
+Public release layout for running clean and attacked RAG-SVA predictions.
+See `docs/REPRODUCTION_SCOPE.md` for what is in-repo vs external.
 
-## Official Entry Points
+## Entry points
 
 - `src/rag_da.py`: importable core attack implementation.
 - `examples/rag-da-example.py`: dependency-free smoke test.
-- `scripts/rag_da_reproduce.py`: canonical clean baseline and RAG-DA attack runner.
+- `scripts/rag_da_reproduce.py`: clean baseline and RAG-DA attack runner.
 - `scripts/compute_metrics.py`: accuracy / F1 / MCC plus CMR, DSR, and true ASR.
-- `configs/vuln_beam_best.yaml`: paper-aligned beam-search configuration.
+- `configs/vuln_beam_best.yaml`: default beam-search settings (Section 5.4).
 - `src/retrieval.py`: FAISS retrieval, prompt construction, and LLM inference.
 
 ## Minimal Usage
@@ -40,8 +41,8 @@ The public implementation uses token-level normalized Levenshtein distance for
 edit/stealth and diversity terms.  The similarity term supports:
 
 - default: use the candidate's stored retriever score (`score`);
-- paper-aligned: pass `variant_score_fn(variant, original)` to recompute retrieval
-  similarity after identifier renaming.
+- with recompute: pass `variant_score_fn(variant, original)` to refresh retrieval
+  similarity after identifier renaming (default in the runner).
 
 ## Parameters
 
@@ -54,6 +55,9 @@ edit/stealth and diversity terms.  The similarity term supports:
 - `diversity_lambda`: diversity bonus weight
 - `edit_lambda`: edit penalty weight
 - `variant_score_fn`: optional callback for recomputing retrieval similarity
+
+The default runner uses `topk=5` (Section 5.4.1) and variant-first beam search
+with one selected variant per retrieved demonstration (Algorithm 1).
 
 Environment variables for the full pipeline include `CODE_EMBEDDING_MODEL`,
 `DESC_EMBEDDING_MODEL`, `EMBED_MAX_LENGTH`, `EMBED_POOLING`, `RAG_ALPHA`,

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Canonical RAG-DA reproduction runner.
+"""End-to-end clean baseline and RAG-DA attack runner.
 
 Pipeline:
 1. retrieve demonstrations with the FAISS code+description retriever;
@@ -129,16 +129,17 @@ def select_demos(
     pool: List[Dict[str, Any]],
     args: argparse.Namespace,
 ) -> List[Dict[str, Any]]:
+    demos = pool[: args.topk]
     if mode == "clean":
-        return pool[: args.topk]
+        return demos
 
     variant_score_fn = None
     if args.recompute_variant_similarity:
         variant_score_fn = build_variant_score_fn(query_code, query_desc, args.alpha, args.beta)
 
     return rag_da_attack(
-        fixed_demos=pool[: args.pool_size],
-        k=args.topk,
+        fixed_demos=demos,
+        k=len(demos),
         beam_width=args.beam_width,
         variant_m=args.variant_m,
         max_ids=args.rewrite_max_ids,
@@ -163,7 +164,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-file", default=os.getenv("OUTPUT_FILE", "result2/rag_da_attack_results.xlsx"))
     parser.add_argument("--train-file", default=os.getenv("TRAIN_FILE", ""))
     parser.add_argument("--topk", type=int, default=int(os.getenv("TOPK", "5")))
-    parser.add_argument("--pool-size", type=int, default=int(os.getenv("POOL_SIZE", "30")))
+    parser.add_argument(
+        "--pool-size",
+        type=int,
+        default=int(os.getenv("POOL_SIZE", os.getenv("TOPK", "5"))),
+        help="Deprecated alias for --topk (default 5, Section 5.4.1).",
+    )
     parser.add_argument("--beam-width", type=int, default=int(os.getenv("BEAM_WIDTH", "8")))
     parser.add_argument("--variant-m", type=int, default=int(os.getenv("VARIANT_M", "3")))
     parser.add_argument("--rewrite-max-ids", type=int, default=int(os.getenv("REWRITE_MAX_IDS", "3")))
@@ -187,6 +193,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.pool_size != args.topk:
+        print(
+            f"[warn] --pool-size={args.pool_size} ignored; using topk={args.topk} "
+            f"demonstrations (Section 5.4.1)."
+        )
+        args.pool_size = args.topk
     train_cve_ids = load_train_cve_ids(args.train_file) if args.train_file else None
 
     output_path = pathlib.Path(args.output_file)
@@ -203,7 +215,7 @@ def main() -> None:
         print(f"[start] loaded {args.input_file}")
 
     rows = df[~df["Predicted"].astype(str).str.strip().isin(VALID_LEVELS)].index
-    print(f"[config] mode={args.mode} topk={args.topk} pool={args.pool_size} beam={args.beam_width}")
+    print(f"[config] mode={args.mode} topk={args.topk} beam={args.beam_width}")
     print(f"[config] recompute_variant_similarity={args.recompute_variant_similarity}")
     print(f"[todo] rows={len(rows)}")
 
@@ -224,7 +236,7 @@ def main() -> None:
                 query_code=query_code,
                 query_desc=query_desc,
                 train_cve_ids=train_cve_ids,
-                topk=args.pool_size,
+                topk=args.topk,
                 search_factor=args.search_factor,
                 alpha=args.alpha,
                 beta=args.beta,

@@ -23,6 +23,7 @@ DESC_EMBEDDING_MODEL = os.getenv("DESC_EMBEDDING_MODEL", "shibing624/text2vec-ba
 ALPHA = float(os.getenv("RAG_ALPHA", "0.6"))
 BETA = float(os.getenv("RAG_BETA", "0.4"))
 TOPK = int(os.getenv("TOPK", "5"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "1024"))
 
 # ================== 鏁版嵁搴撹繛鎺?===================
 def _connect_postgres():
@@ -279,7 +280,7 @@ def rag_multimodal_search(query_code, query_desc, topk=TOPK, alpha=ALPHA, beta=B
 
     if search_factor is None:
         try:
-            search_factor = int(os.getenv("RAG_SEARCH_FACTOR", "2"))
+            search_factor = int(os.getenv("RAG_SEARCH_FACTOR", "4"))
         except Exception:
             search_factor = 2
     if search_factor < 1:
@@ -377,7 +378,7 @@ def _chat_official(messages):
                 model=_MODEL,
                 messages=messages,
                 temperature=0.0,
-                max_tokens=512,
+                max_tokens=LLM_MAX_TOKENS,
                 stream=False,
             )
             if resp and resp.choices and resp.choices[0].message.content:
@@ -410,7 +411,7 @@ def _chat_raw(messages):
         "model": _MODEL,
         "messages": messages,
         "temperature": 0.0,
-        "max_tokens": 512,
+        "max_tokens": LLM_MAX_TOKENS,
         "stream": False,
     }
     max_retries = int(os.getenv("LLM_MAX_RETRIES", "3"))
@@ -456,7 +457,7 @@ def _call_llm(messages) -> str:
         model=_MODEL,
         messages=messages,
         temperature=0.0,
-        max_tokens=512,
+        max_tokens=LLM_MAX_TOKENS,
         stream=False,
     )
     return resp.choices[0].message.content if resp and resp.choices else ""
@@ -946,9 +947,7 @@ def predict_vuln_level_with_knowledge(query_code, query_desc, topk_samples):
 
 # ================== Few-shot CoT ==================
 def predict_vuln_level_fewshot_cot(query_code, query_desc, topk_samples):
-    """
-    灏戞牱鏈珻OT 鍏堝垎鏋愮浉浼兼紡娲炴牱鏈紝鍦ㄧ粨鍚堝垎鏋愮洿鎺ョ敓鎴愮洰鏍囨紡娲炵殑缁撴瀯鍖栬В閲婃€х煡璇嗭紝鏈€鍚庣敓鎴愭紡娲炵瓑绾?
-    """
+    """Few-shot chain-of-thought severity prediction (ReVul-CoT-style)."""
     prompt = "Your task is to analyze vulnerabilities step by step and finally output only the severity of the target vulnerability.\n\n"
 
     # Step1: 鍒嗘瀽绀轰緥
@@ -1131,7 +1130,7 @@ def predict_vuln_level_rag_llm_beam(
 if __name__ == "__main__":
     print(
         "[WARN] Direct execution of src/retrieval.py is legacy. "
-        "Use scripts/rag_da_reproduce.py for paper reproduction."
+        "Use scripts/rag_da_reproduce.py for clean/attack runs."
     )
     input_file = os.getenv("INPUT_FILE", "datasets/test/test_all.xlsx")
     output_file = os.getenv("OUTPUT_FILE", "test_all_predicted2.xlsx")

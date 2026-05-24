@@ -2,7 +2,7 @@
 
 Place BigVul-derived files here for zero-transfer experiments.
 
-Expected primary file for the paper-style zero-transfer run:
+Expected primary file for the zero-transfer run described in Section 5:
 
 - `test_subset_1208_no_overlap.xlsx`
 

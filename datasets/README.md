@@ -11,7 +11,7 @@ files at the paths below after downloading or preprocessing the datasets.
 
 ## Expected Files
 
-The full reproduction scripts look for the following paths:
+End-to-end scripts expect the following paths when you provide local data:
 
 | Purpose | Expected path |
 | --- | --- |

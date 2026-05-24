@@ -48,7 +48,9 @@ def load_labels(path: Path, predicted_col: str, truth_col: str):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Compute paper metrics from prediction files.")
+    parser = argparse.ArgumentParser(
+        description="Compute CMR, DSR, true ASR, and related metrics from prediction files."
+    )
     parser.add_argument("--predictions", required=True, help="Attack or evaluation workbook (.xlsx)")
     parser.add_argument("--clean", default="", help="Optional clean baseline workbook for DSR/ASR")
     parser.add_argument("--predicted-col", default="Predicted")

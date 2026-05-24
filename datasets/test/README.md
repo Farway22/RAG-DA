@@ -1,6 +1,6 @@
 # MegaVul Test Split Placeholder
 
-Place the MegaVul test split files here for full reproduction.
+Place the MegaVul test split files here for end-to-end runs.
 
 Expected primary file:
 

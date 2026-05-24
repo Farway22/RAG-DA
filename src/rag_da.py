@@ -130,6 +130,11 @@ ROLE_WEIGHTS = {
     VariableRole.LOOP_INDEX: 30.0,
 }
 
+# Paper Section 5.6: slot ranking uses alpha=1.0, beta=1.0, gamma=2.0 in Eq. (9).
+SLOT_RANK_ALPHA = float(os.getenv("SLOT_RANK_ALPHA", "1.0"))
+SLOT_RANK_BETA = float(os.getenv("SLOT_RANK_BETA", "1.0"))
+SLOT_RANK_GAMMA = float(os.getenv("SLOT_RANK_GAMMA", "2.0"))
+
 ROLE_QUOTAS = {
     VariableRole.PARAMETER: (0, 3),
     VariableRole.RESOURCE: (0, 2),
@@ -357,13 +362,17 @@ def _extract_variables(ast_root: Any) -> List[VariableInfo]:
             usage_count = _count_variable_usage(var_name, ast_root)
             vuln_prox = _find_vuln_proximity(var_name, ast_root)
             role_weight = ROLE_WEIGHTS.get(role, 50.0)
-            freq_score = min(usage_count * 5.0, 50.0)
+            importance_score = (
+                SLOT_RANK_ALPHA * float(usage_count)
+                + SLOT_RANK_BETA * vuln_prox
+                + SLOT_RANK_GAMMA * (role_weight / 100.0)
+            )
             var = VariableInfo(
                 name=var_name,
                 role=role,
                 family=family,
                 usage_count=usage_count,
-                importance_score=role_weight + freq_score + vuln_prox,
+                importance_score=importance_score,
                 decl_node=decl_node,
                 use_nodes=_collect_use_nodes(var_name, decl_node, ast_root),
             )
@@ -627,7 +636,7 @@ def select_beam_variant_topk(
     k: int,
     beam_width: int = 8,
     variant_m: int = 3,
-    max_ids: int = 1,
+    max_ids: int = 3,
     seed: int = 42,
     w_sim: float = 1.0,
     diversity_lambda: float = 0.1,
@@ -688,7 +697,7 @@ def rag_da_attack(
     k: int = 5,
     beam_width: int = 8,
     variant_m: int = 3,
-    max_ids: int = 1,
+    max_ids: int = 3,
     seed: int = 42,
     w_sim: float = 1.0,
     diversity_lambda: float = 0.1,

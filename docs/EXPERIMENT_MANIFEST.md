@@ -1,12 +1,11 @@
 # Experiment Manifest
 
-This manifest documents where full experiment artifacts should be placed when
-reproducing the paper locally.  The GitHub repository keeps code and
-placeholders only; datasets, FAISS indexes, full prediction workbooks, logs,
-and paper figures should be distributed through an external artifact archive
-when licensing and size permit.
+This manifest lists where optional experiment artifacts can be placed locally.
+The GitHub repository keeps code and placeholders only; datasets, FAISS indexes,
+full prediction workbooks, logs, and figures are expected outside git when
+licensing and size require it.
 
-## Canonical Code Path
+## Code paths
 
 | Purpose | Path |
 | --- | --- |
@@ -27,8 +26,8 @@ when licensing and size permit.
 
 ## Expected External Artifacts
 
-Place external artifacts at these paths if you want to verify paper tables from
-cached predictions rather than rerunning the models:
+Place external artifacts at these paths if you have cached predictions from our
+lab (or your own reruns) and want to inspect them locally:
 
 | Area | Expected local path |
 | --- | --- |
