@@ -1,0 +1,16 @@
+﻿review_id,sample_id,demo_index,old_identifier,new_identifier,old_family,new_family,replacement_count,clean_chars,adversarial_chars,screening_status,review_decision,review_notes
+1,366,7,len,length,counter,counter,2,155,161,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+2,330,23,offset,cursor,index,index,5,158,158,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+3,525,21,size,length,counter,counter,3,165,171,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+4,79,22,arr,vec,buffer,buffer,3,181,181,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+5,1154,29,value,var,generic,generic,2,182,178,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+6,926,13,result,res,generic,generic,6,192,174,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+7,107,9,count,counter,counter,counter,4,200,208,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+8,1051,0,data,memory,buffer,buffer,2,217,221,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+9,164,13,cnt,total,counter,counter,2,220,224,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+10,405,15,length,size,counter,counter,3,318,312,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+11,888,26,err,error,flag,flag,7,340,354,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+12,124,6,ret,res,generic,generic,2,356,356,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+13,888,13,status,flag,flag,flag,2,358,354,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+14,172,19,number,counter,counter,counter,2,378,380,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.
+15,401,19,num,total,counter,counter,2,426,430,included_in_executable_validation,included,Passed conservative screening and included in the executable paired-transformation suite.

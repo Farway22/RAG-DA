@@ -1,60 +1,68 @@
-# Artifact Scope
+# Reproduction Scope
 
-This repository is a **reference implementation** of RAG-DA as described in the
-paper. Reviewers and third parties can inspect the attack logic, default
-hyperparameters, and metric code here. **End-to-end numbers** (CMR, DSR, accuracy,
-etc.) still depend on datasets, FAISS indexes, and model endpoints that are
-distributed separately and may drift over time.
+The GitHub repository is a reference implementation of RAG-DA. It is intended
+to make the method, prompts, configurations, and metric interfaces inspectable
+without implying that the main branch alone reproduces every paper table.
 
-## What you can check in this repository
+## Available in the repository
 
-1. **Threat model** — Only retrieved demonstration *code* is modified; query,
-   retriever index, prompt template, and model weights stay fixed
-   (`scripts/rag_da_reproduce.py`).
+- AST-aware identifier-renaming and variant-selection code;
+- retrieval and prompt-construction code;
+- a human-readable paper configuration manifest;
+- CMR, DSR, and true-ASR metric interfaces;
+- query-level bootstrap, exact McNemar, paired sign-flip, and Holm-adjustment code;
+- deterministic algorithm checks and a data-free smoke example;
+- expected paths for external datasets, indexes, and prediction artifacts.
 
-2. **Algorithm 1 structure** — For `topk = k` retrieved demonstrations, beam
-   search returns `k` variants with **one variant per demonstration** (no
-   subsampling from a larger pool):
+The logic-level checks can be run with:
 
-   ```powershell
-   python tests/test_rag_da_algorithm.py
-   ```
+```powershell
+python tests/test_rag_da_algorithm.py
+python examples/rag-da-example.py
+```
 
-3. **Default hyperparameters** — `configs/vuln_beam_best.yaml` and environment
-   defaults (`TOPK=5`, `BEAM_WIDTH=8`, `VARIANT_M=3`, `REWRITE_MAX_IDS=3`,
-   `RAG_ALPHA=0.6`, `RAG_BETA=0.4`).
+## Required for exact table reproduction
 
-4. **Metric definitions** — `src/rag_da_metrics.py` and
-   `scripts/compute_metrics.py` implement DSR, CMR, and true ASR as in Section 5.5.
+Exact paper values depend on the following matched artifacts:
 
-5. **Smoke test without external data** — `python examples/rag-da-example.py`
-   exercises AST renaming and beam selection on toy demonstrations only.
-
-## What this repository does not claim
-
-| Factor | Why reported numbers may differ across runs |
+| Dependency | Why it matters |
 | --- | --- |
-| Commercial LLM APIs | Provider updates, routing, decoding (see Section 5.6). |
-| Local GPU / driver stack | PyTorch/CUDA build differences for open-weight models. |
-| Dataset snapshots | MegaVul/BigVul splits are not redistributed in git. |
-| FAISS indexes | Must be rebuilt or downloaded; ties can change with caches. |
-| Beam weights | Paper λ₁, λ₂, λ₃ were tuned on validation; public defaults are in `configs/vuln_beam_best.yaml`. |
+| Dataset snapshots and split identifiers | Define the exact query and retrieval populations. |
+| FAISS indexes and row maps | Fix the retrieved candidates and their ordering. |
+| Model checkpoints or API endpoints | Determine model outputs and may change over time. |
+| Prompt/configuration manifest | Fixes inference and attack settings. |
+| Paired clean/attack prediction files | Permit query-level metric and significance checks. |
+| Software/hardware environment | Affects local inference and embedding behavior. |
 
-## Suggested wording (paper / README / rebuttal)
+These artifacts are not all stored in the Git main branch. Expected locations
+are listed in `EXPERIMENT_MANIFEST.md`.
 
-- Reasonable: “We release code that implements RAG-DA (Section 4) and the metric
-  definitions used in our evaluation.”
-- Reasonable: “In-repo unit tests and the smoke example check attack structure
-  without external data.”
-- Avoid: “Cloning this repo alone reproduces every value in Table 2.”
-- Avoid: “Independent reruns will match our lab numbers bit-for-bit.”
+## Metric conventions
 
-## Suggested workflow for external readers
+The manuscript uses the following conventions:
 
-1. `python tests/test_rag_da_algorithm.py` — structure only, no API.
-2. `python examples/rag-da-example.py` — toy demo, no API.
-3. Obtain datasets + FAISS per `datasets/README.md` and `faiss/` instructions.
-4. Configure model credentials; run `scripts/rag_da_reproduce.py` (clean, then attack).
-5. Use `scripts/compute_metrics.py` on your outputs; compare **trends** (e.g.,
-   higher CMR/DSR under attack) when setups are similar, not necessarily every
-   table digit unless artifacts and backends match ours.
+- DSR: `y_adv < y_true` on ground-truth `HIGH`/`CRITICAL` queries;
+- CMR: adversarial prediction below `CRITICAL` on true-`CRITICAL` queries;
+- true ASR: `y_adv < y_true` among queries correctly classified by the paired
+  clean baseline.
+
+Clean and attack predictions must be joined by a stable query identifier before
+paired metrics are computed; row position alone is not a sufficient key.
+
+## Release plan
+
+Subject to third-party licenses, the authors plan to archive split metadata,
+checksums, compact derived result summaries, and remaining audit material upon
+paper acceptance. Raw third-party benchmarks, model weights, API credentials,
+and provider-controlled endpoints are not redistributed by this repository.
+
+## Interpretation
+
+Appropriate claim:
+
+> The repository releases a reference implementation, prompt and configuration
+> specifications, metric code, and logic-level checks for RAG-DA.
+
+Claim to avoid:
+
+> Cloning the GitHub repository alone reproduces every value in the paper.

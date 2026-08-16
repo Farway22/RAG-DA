@@ -1,0 +1,216 @@
+{
+  "compiler_family": "Microsoft Visual C/C++",
+  "compiler_version": "19.44.35219",
+  "cases": [
+    {
+      "name": "intset_resize",
+      "sample_id": 366,
+      "demo_index": 7,
+      "mapping": "len -> length",
+      "language": "c",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "0:4:0\n1:4:10\n8:4:560\n31:4:7998\n",
+      "diagnostic_codes": [
+        "warning C4200"
+      ],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "read_u32",
+      "sample_id": 330,
+      "demo_index": 23,
+      "mapping": "offset -> cursor",
+      "language": "c",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "1\n305419896\n4007513275\n",
+      "diagnostic_codes": [],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "xmalloc",
+      "sample_id": 525,
+      "demo_index": 21,
+      "mapping": "size -> length",
+      "language": "c",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "1:0\n16:1800\n257:32642\n",
+      "diagnostic_codes": [],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "could_recur",
+      "sample_id": 79,
+      "demo_index": 22,
+      "mapping": "arr -> vec",
+      "language": "cpp",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "0\n1\n1\n1\n",
+      "diagnostic_codes": [],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "nlm_destroy",
+      "sample_id": 1154,
+      "demo_index": 29,
+      "mapping": "value -> var",
+      "language": "c",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "free_calls=2\n",
+      "diagnostic_codes": [],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "read_uint32",
+      "sample_id": 926,
+      "demo_index": 13,
+      "mapping": "result -> res",
+      "language": "c",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "1\n305419896\n3437096703\n",
+      "diagnostic_codes": [],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "sk_auto_stmalloc",
+      "sample_id": 107,
+      "demo_index": 9,
+      "mapping": "count -> counter",
+      "language": "cpp",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "0:0\n1:1\n1:0\n",
+      "diagnostic_codes": [],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "option_persist",
+      "sample_id": 1051,
+      "demo_index": 0,
+      "mapping": "data -> memory",
+      "language": "c",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "1:cache-dir:1\n",
+      "diagnostic_codes": [
+        "warning C4100"
+      ],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "jas_stream_read",
+      "sample_id": 164,
+      "demo_index": 13,
+      "mapping": "cnt -> total",
+      "language": "c",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "3:102030\n2:4050\n",
+      "diagnostic_codes": [
+        "warning C4244"
+      ],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "assignment_map",
+      "sample_id": 405,
+      "demo_index": 15,
+      "mapping": "length -> size",
+      "language": "c",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "0:5\n7:12\n31:36\n",
+      "diagnostic_codes": [],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "ssl_status",
+      "sample_id": 888,
+      "demo_index": 26,
+      "mapping": "err -> error",
+      "language": "c",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "1042:42\n1007:7\n1099:99\n",
+      "diagnostic_codes": [
+        "warning C4100",
+        "warning C4189"
+      ],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "snmp_exceptions",
+      "sample_id": 124,
+      "demo_index": 6,
+      "mapping": "ret -> res",
+      "language": "c",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "0:5\n0:9\n",
+      "diagnostic_codes": [],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "h2o_on_read",
+      "sample_id": 888,
+      "demo_index": 13,
+      "mapping": "status -> flag",
+      "language": "c",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "001111\n110000\n",
+      "diagnostic_codes": [],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "svg_load_page",
+      "sample_id": 172,
+      "demo_index": 19,
+      "mapping": "number -> counter",
+      "language": "c",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "1:1:1\n",
+      "diagnostic_codes": [],
+      "diagnostics_equal": true
+    },
+    {
+      "name": "count_extensions",
+      "sample_id": 401,
+      "demo_index": 19,
+      "mapping": "num -> total",
+      "language": "c",
+      "clean_compiled": true,
+      "adversarial_compiled": true,
+      "outputs_equal": true,
+      "clean_output": "0:10:1\n1:34:4\n2:54:6\n",
+      "diagnostic_codes": [
+        "warning C4267"
+      ],
+      "diagnostics_equal": true
+    }
+  ],
+  "all_clean_compiled": true,
+  "all_adversarial_compiled": true,
+  "all_outputs_equal": true,
+  "all_diagnostics_equal": true
+}

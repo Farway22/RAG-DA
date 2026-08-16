@@ -1,0 +1,8 @@
+{
+  "split": "megavul_train",
+  "rows": 9651,
+  "source_filename": "train_all.xlsx",
+  "source_file_sha256": "5d8fd0d539180a6401c97cc3bf53924fcc50720225c26774f11efa2c1f17ee17",
+  "manifest_sha256": "4aada3740329c28b43f59446f1a2c330683d5e4ea6964aef80da7c52242bafd5",
+  "row_digest": "SHA-256 of canonical JSON containing every retained source column"
+}

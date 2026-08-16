@@ -1,0 +1,8 @@
+{
+  "split": "bigvul_transfer",
+  "rows": 1208,
+  "source_filename": "test_subset_1208_no_overlap.xlsx",
+  "source_file_sha256": "80ec1a8b769a88b67183f9452de5a65c4ba6e9d34d7764df14be890fbeb64504",
+  "manifest_sha256": "2c3fee2a35e8eb0a5cf1e50503443f8060d5e87d5cdeaeaaf47a2bb5608fe694",
+  "row_digest": "SHA-256 of canonical JSON containing every retained source column"
+}

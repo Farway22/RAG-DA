@@ -1,24 +1,17 @@
-# Running the RAG-DA Artifact
+# Running the Reference Artifact
 
-How to run clean baselines and RAG-DA attacks beyond the in-repo smoke test.
-For what is (and is not) covered by the public code alone, see
-`docs/REPRODUCTION_SCOPE.md`.
+This guide covers the public reference runner. It assumes that the user has
+obtained compatible benchmark files, FAISS artifacts, and a model backend. See
+`REPRODUCTION_SCOPE.md` before comparing fresh outputs with paper tables.
 
-## Entry points
+## Logic-only checks
 
-| Purpose | Command / file |
-| --- | --- |
-| Algorithm structure (no data) | `python tests/test_rag_da_algorithm.py` |
-| Smoke test | `python examples/rag-da-example.py` |
-| Clean / attack runner | `python scripts/rag_da_reproduce.py` |
-| Attack core | `src/rag_da.py` |
-| Retrieval + LLM | `src/retrieval.py` |
-| Metrics CLI | `python scripts/compute_metrics.py` |
-| Default beam settings | `configs/vuln_beam_best.yaml` |
+```powershell
+python tests/test_rag_da_algorithm.py
+python examples/rag-da-example.py
+```
 
-`scripts/rag_da_reproduce.py` wires retrieval, `src/rag_da.py`, prompting, and
-LLM calls with the defaults in `configs/vuln_beam_best.yaml`. Other ad-hoc
-scripts are not part of this release.
+These checks require no benchmark data, index, database, or API credential.
 
 ## Environment
 
@@ -26,7 +19,8 @@ scripts are not part of this release.
 pip install -r requirements/requirements.txt
 ```
 
-Model credentials are read from environment variables. Do not commit real API keys.
+Credentials and endpoint settings must be supplied through environment
+variables. Do not commit real keys.
 
 ```powershell
 $env:DEEPSEEK_API_KEY = "<api key>"
@@ -34,27 +28,46 @@ $env:DEEPSEEK_BASE_URL = "https://api.example.com/v1"
 $env:DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-V3.2"
 ```
 
-OpenAI-compatible backends can also be configured with `GPT_API_KEY`, `GPT_BASE_URL`,
-and `GPT_MODEL`, or `QWEN_API_KEY`, `QWEN_BASE_URL`, and `QWEN_MODEL`.
+Equivalent OpenAI-compatible backends may be configured with the corresponding
+`GPT_*`, `QWEN_*`, or `XAI_*` variables. The commercial API configurations
+recorded for the study are:
 
-## Data and indexes
+```powershell
+$env:OPENAI_API_KEY = "<OpenAI API key>"
+$env:GPT_BASE_URL = "https://api.openai.com/v1"
+$env:GPT_MODEL = "gpt-5.1"
 
-Expected local files:
+$env:XAI_API_KEY = "<xAI API key>"
+$env:XAI_BASE_URL = "https://api.x.ai/v1"
+$env:XAI_MODEL = "grok-4-1-fast-reasoning"
+```
 
-- MegaVul test set: `datasets/test/test_all.xlsx`
-- MegaVul training split: `datasets/train/train_all.xlsx`
-- BigVul test set: `datasets/bigvul_hf/test_subset_1208_no_overlap.xlsx`
-- FAISS indexes: `faiss/faiss_index_code.index`, `faiss/faiss_index_desc.index`
-- FAISS-to-row map: `faiss/id_map.json`
-- CSV fallback: `datasets/megavul_simple_cpp_success_getast.csv`
+These are official-provider request identifiers, not third-party gateway route
+names. Because commercial providers can revise or retire served backends, a
+fresh call may not reproduce an archived response exactly.
 
-PostgreSQL is optional. If `POSTGRES_*` variables are not set, `src/retrieval.py`
-falls back to the CSV file above when possible. FAISS indexes are loaded lazily,
-so importing the module does not require local indexes until retrieval starts.
+## External files
 
-## MegaVul clean and attack runs
+| Purpose | Expected path |
+| --- | --- |
+| MegaVul test split | `datasets/test/test_all.xlsx` |
+| MegaVul training split | `datasets/train/train_all.xlsx` |
+| BigVul transfer split | `datasets/bigvul_hf/test_subset_1208_no_overlap.xlsx` |
+| Code FAISS index | `faiss/faiss_index_code.index` |
+| Description FAISS index | `faiss/faiss_index_desc.index` |
+| FAISS row map | `faiss/id_map.json` |
+| CSV fallback knowledge base | `datasets/megavul_simple_cpp_success_getast.csv` |
 
-Clean RAG baseline:
+PostgreSQL is optional. The CSV fallback is used when a database connection is
+not configured and the fallback file is available.
+
+The exact split counts, license-safe row identifiers, file checksums, BigVul
+sampling algorithm, and random seed are documented in `DATA_SPLITS.md` and
+`../artifacts/split_manifests/`.
+
+## Reference MegaVul run
+
+Clean baseline:
 
 ```powershell
 $env:INPUT_FILE = "datasets/test/test_all.xlsx"
@@ -62,48 +75,70 @@ $env:OUTPUT_FILE = "result2/reproduce/megavul_clean.xlsx"
 python scripts/rag_da_reproduce.py --mode clean
 ```
 
-RAG-DA attack:
+Attack run:
 
 ```powershell
 $env:INPUT_FILE = "datasets/test/test_all.xlsx"
 $env:OUTPUT_FILE = "result2/reproduce/megavul_attack.xlsx"
 $env:TOPK = "5"
+$env:POOL_SIZE = "30"
 $env:BEAM_WIDTH = "8"
 $env:VARIANT_M = "3"
 $env:REWRITE_MAX_IDS = "3"
-$env:DIVERSITY_LAMBDA = "0.1"
-$env:EDIT_LAMBDA = "0.0"
 python scripts/rag_da_reproduce.py --mode attack --recompute-variant-similarity
 ```
 
-`--recompute-variant-similarity` is enabled by default. It recomputes retrieval
-similarity for each renamed demonstration variant using the same embedding models
-as clean RAG.
+The public runner loads `configs/vuln_beam_best.yaml` by default. Environment
+variables override its values, and explicit CLI arguments override both. Use
+`--config <path>` to select another manifest. `POOL_SIZE` controls the retained
+retrieval candidate pool; `TOPK` controls the ordered demonstrations passed to
+the prompt.
 
-## BigVul zero-transfer runs
+The slot-ranking configuration records frequency, unsafe-call proximity, and
+role weights of `1.0`, `1.0`, and `2.0`, respectively. Frequency is capped as
+`min(5 * occurrence_count, 50)`; unsafe-call proximity adds 10 per matching call
+expression. `family_mode: family` enables Snake/Camel identifier decomposition
+and assignment to the six semantic families described in the paper. Family
+membership combines lexical-overlap and AST-context scores with weights `1.0`
+and `0.5`; the minimum assignment score is `0.5`, and lower-scoring identifiers
+are left unchanged. Family-specific templates are implemented in
+`src/rag_da.py`. The variant seed is combined with a stable identifier digest,
+so it does not depend on Python's process-randomized `hash()`.
+
+The offline dataset-frequency step used to curate the seed lexicons is exposed
+by `scripts/build_semantic_lexicon.py`. It uses the same C/C++ parser and
+variable extraction path as the attack implementation and reports identifier
+and Snake/Camel subtoken frequencies without changing the frozen lexicons at
+run time.
+
+Both `tree-sitter-c` and `tree-sitter-cpp` are installed by the requirements
+manifest. The attack parses each snippet with the available C and C++ grammars,
+keeps an error-free parse, and resolves uses to the nearest visible lexical
+declaration before applying a rename. The paper-facing configuration sets
+`allow_lexical_fallback: false`: if neither grammar yields an error-free tree,
+the candidate is left unchanged. The runner exposes `--allow-lexical-fallback`
+only for explicit smoke-test use.
+
+## Reference BigVul transfer run
+
+Build the transfer subset from locally obtained benchmark tables:
 
 ```powershell
-$env:INPUT_FILE = "datasets/bigvul_hf/test_subset_1208_no_overlap.xlsx"
-$env:TRAIN_FILE = "datasets/train/train_all.xlsx"
-$env:OUTPUT_FILE = "result2/reproduce/bigvul_clean.xlsx"
-python scripts/rag_da_reproduce.py --mode clean
+python scripts/prepare_bigvul_subset.py `
+  --mega-test datasets/test/test_all.xlsx `
+  --bigvul-test datasets/bigvul_hf/test_all.xlsx `
+  --description-source knowledge/train_all_with_nvd_cwe.xlsx `
+  --output datasets/bigvul_hf/test_subset_1208_no_overlap.xlsx `
+  --seed 42
 ```
+
+Use the BigVul query split while retaining the MegaVul training pool:
 
 ```powershell
 $env:INPUT_FILE = "datasets/bigvul_hf/test_subset_1208_no_overlap.xlsx"
 $env:TRAIN_FILE = "datasets/train/train_all.xlsx"
 $env:OUTPUT_FILE = "result2/reproduce/bigvul_attack.xlsx"
 python scripts/rag_da_reproduce.py --mode attack --recompute-variant-similarity
-```
-
-`TRAIN_FILE` keeps retrieved demonstrations within the MegaVul training split
-while evaluating on BigVul.
-
-## Dry run
-
-```powershell
-$env:SMALL_RUN_MAX = "3"
-python scripts/rag_da_reproduce.py --mode attack --dry-run
 ```
 
 ## Metrics
@@ -114,14 +149,46 @@ python scripts/compute_metrics.py `
   --clean result2/reproduce/megavul_clean.xlsx
 ```
 
-This prints accuracy, macro-F1, MCC, CMR_adv, DSR, and true ASR using
-`src/rag_da_metrics.py`.
+Paired metrics must use a stable query identifier shared by the clean and attack
+files. The manuscript definitions are summarized in `REPRODUCTION_SCOPE.md`.
 
-## Release hygiene
+## Paired statistical analysis
 
-Before publishing:
+`scripts/analyze_main_statistics.py` accepts a compact query-level CSV:
 
-- confirm `Select-String -Recurse -Pattern 'sk-'` returns no API keys;
-- keep only sanitized scripts with environment-variable credentials;
-- include split IDs or hashes for datasets that cannot be redistributed;
-- document model strings, decoding settings, and artifact paths used in your runs.
+| Column | Meaning |
+| --- | --- |
+| `model` | Paper model label |
+| `query_id` | Stable identifier within the model |
+| `y_true` | Ground-truth severity |
+| `y_clean` | Parsed clean prediction |
+| `y_adv` | Parsed attacked prediction |
+
+The file contains labels only; it need not disclose vulnerability source code,
+retrieved demonstrations, prompts, explanations, or model responses. Blank
+prediction fields represent unparseable responses and remain incorrect cases
+in the global-accuracy denominator.
+
+```powershell
+python scripts/analyze_main_statistics.py `
+  --input artifacts/main_predictions.csv `
+  --output-prefix artifacts/main_statistics
+```
+
+The output records the input SHA-256 digest and reports point estimates and
+counts, 95% bootstrap intervals, two-sided exact McNemar tests,
+paired sign-flip tests on the ground-truth High/Critical subset, and Holm
+adjustments across models. The default settings match the manuscript: 10,000
+bootstrap resamples, 100,000 permutations, and seed `20260201`.
+
+No manuscript values or prediction snapshot are built into the command. When a
+matched private or archival snapshot is available, an optional JSON of
+reference values can be passed with `--targets` to check displayed precision.
+
+## What a fresh run can establish
+
+A fresh run can check that the public pipeline executes and that the same metric
+definitions can be applied to paired outputs. Matching every published digit
+requires the original split, indexes, model/backend version, and paired
+prediction artifacts; API-backed outputs may also vary as providers update
+their services.

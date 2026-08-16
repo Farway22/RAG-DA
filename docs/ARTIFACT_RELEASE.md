@@ -1,71 +1,49 @@
-# Artifact Release Guide
+# Artifact Release Policy
 
-This file records what should be committed to the GitHub repository and what is
-better published as a release asset or external archive.
+The release is divided between the lightweight Git repository and an archival
+artifact bundle. This keeps the code reviewable while respecting benchmark
+licenses and avoiding large generated files in Git history.
 
-## Current Size Snapshot
+## Main Git repository
 
-Approximate local sizes observed in the working directory before pruning the
-public release:
+The main branch contains:
 
-| Path | Size |
-| --- | ---: |
-| `result2/` | 388 MB |
-| `datasets/` | 173 MB |
-| `code_trans/` | 141 MB |
-| `faiss/` | 43 MB |
+- source code and tests;
+- prompt and configuration specifications;
+- metric implementations;
+- documentation and expected artifact paths;
+- small, license-safe examples.
 
-The largest files in `result2/` are long run logs and full demonstration dumps,
-for example:
+## Archival artifact bundle
 
-| File type | Example size |
-| --- | ---: |
-| GPT-5.1 attack log | 89.77 MB |
-| Grok attack log | 58.63 MB |
-| Qwen full attack workbook/log copy | 42.42 MB |
-| Baseline demonstration JSONL dumps | about 23 MB each |
+Subject to applicable licenses, an acceptance-stage archive is planned to
+contain:
 
-These files are below GitHub's hard 100 MB per-file limit, but committing many
-of them makes the repository slow to clone and review.
+- dataset split identifiers and checksums;
+- preprocessing and index metadata;
+- frozen experiment configuration files;
+- compact table-level metric summaries;
+- paired clean/attack prediction identifiers and derived statistics;
+- hashes that connect summaries to the corresponding artifacts.
 
-## Recommended GitHub Contents
+The archive may be hosted through a versioned GitHub Release, Zenodo, OSF, or
+institutional storage. Its persistent location and checksum should be added to
+the main README when available.
 
-Commit to git:
+## Not redistributed
 
-- source code and scripts;
-- README and run documentation;
-- small sample data;
-- table-level summaries such as compact `.json`, `.md`, or small `.xlsx`
-  files;
-- split metadata, hashes, and preprocessing scripts;
-- small figures used by the paper or README.
+The following are outside the public release unless their licenses explicitly
+permit redistribution:
 
-Publish outside git when large:
+- raw third-party benchmark payloads;
+- provider-controlled model weights or endpoints;
+- API keys and private database credentials;
+- unrestricted prompt/response logs containing licensed or sensitive data;
+- disposable caches and development-only workspaces.
 
-- raw benchmark datasets;
-- FAISS indexes and embedding caches;
-- full run logs;
-- full prompt/response traces;
-- large intermediate JSONL dumps;
-- model weights and tokenizer caches.
+## During peer review
 
-Good external locations include GitHub Releases, Zenodo, OSF, institutional
-storage, or Google Drive.  If an artifact is external, keep its expected local
-path in the README so users know where to place it after download.
-
-Dataset payloads are ignored by `.gitignore` in this repository.  The public
-repository should keep only `datasets/README.md` and subdirectory placeholder
-READMEs unless the dataset license explicitly permits redistribution and the
-file size is appropriate for git.
-
-## Suggested Result Policy
-
-Optional external bundles may include:
-
-- compact metric summaries, such as `result2/bigvul_results_metrics.json`;
-- prediction workbooks used in our evaluation;
-- `docs/EXPERIMENT_MANIFEST.md`, which maps paths to experiment sections.
-
-Avoid committing generated logs such as `*_run.log` and large intermediate
-`*_demos_full.jsonl` files unless they are necessary for a specific archival
-claim.
+The GitHub repository should be described as a reference implementation. It
+should not be presented as a complete table-replication package before the
+matched archival artifacts are available. Verification requests for restricted
+or not-yet-archived material may be handled by the authors during review.

@@ -1,0 +1,8 @@
+{
+  "split": "megavul_test",
+  "rows": 1208,
+  "source_filename": "test_all.xlsx",
+  "source_file_sha256": "c207e471b1b21abc4c31515cec9d2e9684b53a67c04b332e22cc139c2e2a044e",
+  "manifest_sha256": "65aa1024e8f7457a4a9f916ccba98a099959e46a9821adfef740d98af7520cea",
+  "row_digest": "SHA-256 of canonical JSON containing every retained source column"
+}

@@ -1,0 +1,8 @@
+{
+  "split": "megavul_validation",
+  "rows": 1207,
+  "source_filename": "valid_all.xlsx",
+  "source_file_sha256": "25c8608158002c989435a0c804219a44a57cd8c955ef847355502107d424e6ef",
+  "manifest_sha256": "9875a6db3e5d94bfcb07ab9977e3fbdfa1b73966564e4fb394b74788f722bd17",
+  "row_digest": "SHA-256 of canonical JSON containing every retained source column"
+}

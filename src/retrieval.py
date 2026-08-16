@@ -12,6 +12,7 @@ import os
 import json
 from openai import OpenAI
 import time
+from prompt_templates import build_simple_prompt
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 # ================== 閰嶇疆 ==================
@@ -68,9 +69,6 @@ def _load_fallback_df():
     except Exception:
         _FALLBACK_DF = None
     return _FALLBACK_DF
-
-# Global reference to current evaluation DataFrame (for NO_RAG pool)
-CURRENT_EVAL_DF = None
 
 # ================== FAISS indexes (lazy) ==================
 _index_code = None
@@ -205,7 +203,7 @@ def _ensure_embed_models() -> None:
 
 # ================== Embedding helpers ==================
 def embed_text(text, tokenizer, model, max_length=MAX_LENGTH, pooling=POOLING):
-    # 纭繚text鏄瓧绗︿覆绫诲瀷
+    # Ensure the embedding input is a string.
     if not isinstance(text, str):
         if text is None:
             text = ''
@@ -235,7 +233,7 @@ def embed_desc(text):
     _ensure_embed_models()
     return embed_text(text, _desc_tokenizer, _desc_model)
 
-# ================== 澶氭ā鎬?RAG 妫€绱?==================
+# ================== Multimodal RAG retrieval ==================
 # def cross_encoder_rerank(query_code, query_desc, candidates, topk, batch_size=8):
 #     texts_a = [query_desc + "\n" + query_code] * len(candidates)
 #     texts_b = [cand['description'] + "\n" + cand['code'] for cand in candidates]
@@ -269,10 +267,10 @@ def embed_desc(text):
 #     return [item[0] for item in ranked[:topk]]
 
 def rag_multimodal_search(query_code, query_desc, topk=TOPK, alpha=ALPHA, beta=BETA, search_factor: int = None, return_limit: int = None):
-    """
-    妫€绱㈠苟鍚堝苟 code/desc 鍊欓€夈€?
-    - search_factor: 姣忔ā鎬佹悳绱㈡墿澶х郴鏁帮紙榛樿2锛屾垨鐢辩幆澧冨彉閲?RAG_SEARCH_FACTOR 瑕嗙洊锛?
-    - return_limit: 杩斿洖涓婇檺锛堥粯璁や笌 topk 鐩稿悓锛?
+    """Retrieve and fuse code- and description-based nearest neighbors.
+
+    ``search_factor`` expands each FAISS search before fusion, while
+    ``return_limit`` caps the number of fused candidates returned.
     """
     # 1. 鑾峰彇鍚戦噺
     code_vec = np.array(embed_code(query_code), dtype='float32').reshape(1, -1)
@@ -288,7 +286,7 @@ def rag_multimodal_search(query_code, query_desc, topk=TOPK, alpha=ALPHA, beta=B
     if return_limit is None:
         return_limit = topk
 
-    # 2. L2鎼滅储锛屽彇鍚勮嚜鎵╁ぇ鍚庣殑 topk
+    # 2. Search an expanded neighborhood in each FAISS index.
     search_k = max(1, topk * search_factor)
     _, idx_code = index_code.search(code_vec, search_k)
     _, idx_desc = index_desc.search(desc_vec, search_k)
@@ -306,7 +304,7 @@ def rag_multimodal_search(query_code, query_desc, topk=TOPK, alpha=ALPHA, beta=B
         db_code_vec = index_code.reconstruct(idx)
         db_desc_vec = index_desc.reconstruct(idx)
 
-        # 4. 璁＄畻浣欏鸡鐩镐技搴?
+        # 4. Compute code and description similarity.
         code_sim = np.dot(code_vec, db_code_vec).item()
         desc_sim = np.dot(desc_vec, db_desc_vec).item()
 
@@ -315,14 +313,14 @@ def rag_multimodal_search(query_code, query_desc, topk=TOPK, alpha=ALPHA, beta=B
         vuln_info["score"] = score
         results.append(vuln_info)
 
-    # 缁熻鏄犲皠瑕嗙洊
+    # Optional retrieval diagnostics.
     try:
         if os.getenv("PRINT_RAG", "0").strip() == "1":
             print(f"[RAG] candidates={len(candidate_idx)} mapped={len(results)} missing_map={missing} (search_k={search_k}, return_limit={return_limit})")
     except Exception:
         pass
 
-    # 鎺掑簭骞堕檺鍒惰繑鍥炴暟閲?
+    # Rank and truncate the fused candidates.
     results = sorted(results, key=lambda x: x["score"], reverse=True)
     if return_limit is not None and return_limit > 0:
         results = results[:return_limit]
@@ -343,18 +341,21 @@ def rag_multimodal_search(query_code, query_desc, topk=TOPK, alpha=ALPHA, beta=B
 # ================== LLM client (OpenAI-compatible) ==================
 _BASE_URL = (
     os.getenv("GPT_BASE_URL")
+    or os.getenv("XAI_BASE_URL")
     or os.getenv("QWEN_BASE_URL")
     or os.getenv("DEEPSEEK_BASE_URL")
     or "https://api.deepseek.com"
 ).strip()
 _MODEL = (
     os.getenv("GPT_MODEL")
+    or os.getenv("XAI_MODEL")
     or os.getenv("QWEN_MODEL")
     or os.getenv("DEEPSEEK_MODEL")
     or "deepseek-ai/DeepSeek-V3.2"
 ).strip()
 _API_KEY = (
     os.getenv("GPT_API_KEY")
+    or os.getenv("XAI_API_KEY")
     or os.getenv("QWEN_API_KEY")
     or os.getenv("DEEPSEEK_API_KEY")
     or os.getenv("OPENAI_API_KEY")
@@ -415,7 +416,7 @@ def _chat_raw(messages):
         "stream": False,
     }
     max_retries = int(os.getenv("LLM_MAX_RETRIES", "3"))
-    timeout = float(os.getenv("LLM_TIMEOUT", "180"))  # 澧炲姞鍒?80绉?
+    timeout = float(os.getenv("LLM_TIMEOUT", "180"))  # seconds
     backoff = float(os.getenv("LLM_BACKOFF", "2"))
     
     last_err = None
@@ -444,7 +445,7 @@ def _call_llm(messages) -> str:
     if not _API_KEY:
         raise RuntimeError(
             "No LLM API key configured. Set DEEPSEEK_API_KEY, OPENAI_API_KEY, "
-            "GPT_API_KEY, or QWEN_API_KEY before running inference."
+            "GPT_API_KEY, XAI_API_KEY, or QWEN_API_KEY before running inference."
         )
     off = _chat_official(messages)
     if off is not None:
@@ -478,350 +479,8 @@ def _log_prompt_tokens(system_content: str, user_content: str) -> None:
         print(f"[WARN] token counting skipped: {exc}")
 
 
-# ================== Identifier renaming helpers ==================
-_C_LIKE_KEYWORDS = set([
-    'auto','break','case','char','const','continue','default','do','double','else','enum','extern','float','for','goto','if','inline','int','long','register','restrict','return','short','signed','sizeof','static','struct','switch','typedef','union','unsigned','void','volatile','while','_Alignas','_Alignof','_Atomic','_Bool','_Complex','_Generic','_Imaginary','_Noreturn','_Static_assert','_Thread_local',
-    'class','namespace','public','private','protected','template','typename','using','virtual','operator','new','delete','this','friend','nullptr','bool','wchar_t','char16_t','char32_t','constexpr','mutable','throw','try','catch','reinterpret_cast','static_cast','const_cast','dynamic_cast','typeid','explicit',
-])
-
-_RENAME_DICT = [
-    'data','item','value','buffer','ptr','tmp','count','index','flag','result','node','entry','param','offset','length','size','limit','cursor','state','acc','sum','hash','token','key','ident','map','list','array','record','buf','ctx','env','cfg','msg','err','res','val','cur','iter','out','inp'
-]
-
-def _is_ident_start(ch: str) -> bool:
-    return (ch.isalpha() or ch == '_')
-
-def _is_ident_part(ch: str) -> bool:
-    return (ch.isalnum() or ch == '_')
-
-def _collect_identifiers_c_like(code: str):
-    """
-    鏋佺畝 C/C++ 椋庢牸璇嶆硶鍣細璺宠繃娉ㄩ噴/瀛楃涓?瀛楃瀛楅潰閲忥紝浠呭湪浠ｇ爜娈甸噰闆嗘爣璇嗙 token 鍙婂叾璁℃暟銆?
-    杩斿洖 (id_counts: dict[str,int])銆?
-    """
-    i = 0
-    n = len(code)
-    in_line_cmt = False
-    in_blk_cmt = False
-    in_str = False
-    in_char = False
-    esc = False
-    counts = {}
-    while i < n:
-        ch = code[i]
-        nxt = code[i+1] if i + 1 < n else ''
-        if in_line_cmt:
-            if ch == '\n':
-                in_line_cmt = False
-            i += 1
-            continue
-        if in_blk_cmt:
-            if ch == '*' and nxt == '/':
-                in_blk_cmt = False
-                i += 2
-            else:
-                i += 1
-            continue
-        if in_str:
-            if not esc and ch == '"':
-                in_str = False
-            esc = (not esc and ch == '\\')
-            i += 1
-            continue
-        if in_char:
-            if not esc and ch == '\'':
-                in_char = False
-            esc = (not esc and ch == '\\')
-            i += 1
-            continue
-
-        # comment starts
-        if ch == '/' and nxt == '/':
-            in_line_cmt = True
-            i += 2
-            continue
-        if ch == '/' and nxt == '*':
-            in_blk_cmt = True
-            i += 2
-            continue
-        # string/char starts
-        if ch == '"':
-            in_str = True
-            esc = False
-            i += 1
-            continue
-        if ch == '\'':
-            in_char = True
-            esc = False
-            i += 1
-            continue
-
-        # identifier
-        if _is_ident_start(ch):
-            j = i + 1
-            while j < n and _is_ident_part(code[j]):
-                j += 1
-            ident = code[i:j]
-            if ident not in _C_LIKE_KEYWORDS:
-                counts[ident] = counts.get(ident, 0) + 1
-            i = j
-            continue
-
-        i += 1
-    return counts
-
-def _apply_identifier_mapping(code: str, id_map: dict) -> str:
-    """
-    浣跨敤鐩稿悓鐨勬瀬绠€璇嶆硶鍣紝浠呭湪浠ｇ爜娈碉紙闈炴敞閲?瀛楃涓?瀛楃锛変笖绮剧‘ token 鍖归厤鏃舵浛鎹€?
-    """
-    i = 0
-    n = len(code)
-    in_line_cmt = False
-    in_blk_cmt = False
-    in_str = False
-    in_char = False
-    esc = False
-    out_chars = []
-    while i < n:
-        ch = code[i]
-        nxt = code[i+1] if i + 1 < n else ''
-        if in_line_cmt:
-            out_chars.append(ch)
-            if ch == '\n':
-                in_line_cmt = False
-            i += 1
-            continue
-        if in_blk_cmt:
-            out_chars.append(ch)
-            if ch == '*' and nxt == '/':
-                out_chars.append(nxt)
-                in_blk_cmt = False
-                i += 2
-            else:
-                i += 1
-            continue
-        if in_str:
-            out_chars.append(ch)
-            if not esc and ch == '"':
-                in_str = False
-            esc = (not esc and ch == '\\')
-            i += 1
-            continue
-        if in_char:
-            out_chars.append(ch)
-            if not esc and ch == '\'':
-                in_char = False
-            esc = (not esc and ch == '\\')
-            i += 1
-            continue
-
-        # comment starts
-        if ch == '/' and nxt == '/':
-            out_chars.append(ch); out_chars.append(nxt)
-            in_line_cmt = True
-            i += 2
-            continue
-        if ch == '/' and nxt == '*':
-            out_chars.append(ch); out_chars.append(nxt)
-            in_blk_cmt = True
-            i += 2
-            continue
-        # string/char starts
-        if ch == '"':
-            out_chars.append(ch)
-            in_str = True
-            esc = False
-            i += 1
-            continue
-        if ch == '\'':
-            out_chars.append(ch)
-            in_char = True
-            esc = False
-            i += 1
-            continue
-
-        # identifier replacement
-        if _is_ident_start(ch):
-            j = i + 1
-            while j < n and _is_ident_part(code[j]):
-                j += 1
-            ident = code[i:j]
-            repl = id_map.get(ident)
-            out_chars.append(repl if repl is not None else ident)
-            i = j
-            continue
-
-        out_chars.append(ch)
-        i += 1
-    return ''.join(out_chars)
-
-def _generate_new_name_pool(existing: set, seed: int):
-    import random
-    rnd = random.Random(seed)
-    pool = list(_RENAME_DICT)
-    rnd.shuffle(pool)
-    # 纭繚涓嶄笌宸插瓨鍦ㄥ啿绐?
-    for p in list(pool):
-        if p in existing:
-            pool.remove(p)
-    # 鍏滃簳鎵╁睍
-    i = 0
-    while len(pool) < 256 and i < 1000:
-        cand = f"var{i}"
-        if cand not in existing:
-            pool.append(cand)
-        i += 1
-    return pool
-
-def rename_identifiers_safe(code: str, max_ids: int = 2, seed: int = 42, use_ast: bool = True) -> str:
-    """
-    鍙橀噺閲嶅懡鍚嶅嚱鏁帮紝浼樺厛浣跨敤AST鏂规硶锛屽け璐ユ椂闄嶇骇鍒拌瘝娉曞垎鏋?
-    
-    Args:
-        code: C/C++浠ｇ爜
-        max_ids: 鏈€澶氭敼鍐欑殑鍙橀噺鏁?
-        seed: 闅忔満绉嶅瓙
-        use_ast: 鏄惁浼樺厛灏濊瘯AST鏂规硶锛堥粯璁rue锛?
-    
-    Returns:
-        鏀瑰啓鍚庣殑浠ｇ爜
-    """
-    # 浼樺厛灏濊瘯AST鏂规硶
-    if use_ast:
-        try:
-            from rename_ast import rename_identifiers_ast
-            result = rename_identifiers_ast(code, max_ids=max_ids, seed=seed, enable_ast=True)
-            # 濡傛灉AST鏂规硶鎴愬姛锛堣繑鍥炰簡涓嶅悓鐨勪唬鐮侊級锛屼娇鐢ㄥ畠
-            if result != code:
-                return result
-        except Exception:
-            # AST鏂规硶澶辫触锛岄檷绾у埌璇嶆硶鍒嗘瀽
-            pass
-    
-    # 闄嶇骇鍒拌瘝娉曞垎鏋愭柟娉曪紙浣跨敤瀹夊叏鐨刦allback锛?
-    try:
-        from retrieval_fallback_safe import rename_identifiers_fallback_safe
-        result = rename_identifiers_fallback_safe(code, max_ids=max_ids, seed=seed)
-        
-        # 璁剧疆fallback妯″紡鐨勯噸鍛藉悕鏄犲皠锛堢敤浜庤瘖鏂拰鏃ュ織锛?
-        try:
-            import rename_ast
-            rename_ast.LAST_RENAME_MODE = "fallback"
-        except:
-            pass
-        
-        return result
-    except (ImportError, Exception) as e:
-        # 濡傛灉鏂版ā鍧椾笉鍙敤锛屼娇鐢ㄦ棫鐨刦allback閫昏緫锛堜笉鎺ㄨ崘锛?
-        print(f"[fallback] Warning: Using legacy fallback (less safe): {e}", flush=True)
-        # 闄嶇骇鍒拌瘝娉曞垎鏋愭柟娉曪紙鍘熸湁閫昏緫 - 浠呬綔涓烘渶鍚庡閫夛級
-        counts = _collect_identifiers_c_like(code)
-        if not counts:
-            return code
-        # 杩囨护涓嶅彲鏀瑰悕鐨?鐤戜技绫诲瀷/瀹?锛堝惎鍙戝紡锛夛細鍏ㄥぇ鍐欎笖鍚笅鍒掔嚎锛涙垨闀垮害<=1
-        renameables = [ident for ident, c in counts.items() if len(ident) > 1 and not (ident.isupper() and '_' in ident)]
-        if not renameables:
-            return code
-        # 閫夋嫨鍑虹幇娆℃暟澶氱殑浼樺厛
-        renameables.sort(key=lambda x: counts[x], reverse=True)
-        picked = renameables[:max(1, max_ids)]
-        # 鐢熸垚鏂板悕
-        existing = set(counts.keys())
-        pool = _generate_new_name_pool(existing, seed)
-        id_map = {}
-        pi = 0
-        for old in picked:
-            # 璺宠繃宸插湪鏄犲皠
-            if old in id_map:
-                continue
-            # 閫夋嫨涓€涓湭鍐茬獊鐨勬柊鍚?
-            while pi < len(pool) and pool[pi] in existing:
-                pi += 1
-            if pi >= len(pool):
-                break
-            id_map[old] = pool[pi]
-            existing.add(pool[pi])
-            pi += 1
-        if not id_map:
-            return code
-        return _apply_identifier_mapping(code, id_map)
-
-# ================== NO-RAG 鍊欓€夋睜锛堝叏灞€闅忔満閲囨牱锛?==================
-def _build_no_rag_pool(
-    exclude_code: str,
-    exclude_desc: str,
-    pool_size: int,
-    seed: int = 42,
-):
-    import random
-    rnd = random.Random(seed)
-
-    # 浼樺厛浣跨敤澶栭儴鎸囧畾 CSV
-    df_pool = None
-    csv_path = os.getenv("FALLBACK_NO_RAG_CSV", "")
-    if csv_path and os.path.exists(csv_path):
-        try:
-            df_pool = pd.read_csv(csv_path)
-        except Exception:
-            df_pool = None
-
-    # 鍏舵浣跨敤 fallback CSV 鍔犺浇
-    if df_pool is None:
-        df_pool = _load_fallback_df()
-
-    # 鏈€鍚庨€€鍖栦负褰撳墠璇勬祴 DF锛堥伩鍏嶆娊鍒拌嚜韬牱鏈級
-    if df_pool is None:
-        df_pool = CURRENT_EVAL_DF
-
-    results = []
-    if df_pool is None or df_pool.empty:
-        return results
-
-    # 瑙勮寖鍒楀悕鏄犲皠
-    code_col = 'func_before' if 'func_before' in df_pool.columns else ('code' if 'code' in df_pool.columns else None)
-    desc_col = 'description' if 'description' in df_pool.columns else None
-    sev_col = 'Base Severity' if 'Base Severity' in df_pool.columns else ('base_severity' if 'base_severity' in df_pool.columns else None)
-
-    # 鍊欓€夌储寮?
-    idxs = list(range(len(df_pool)))
-    rnd.shuffle(idxs)
-
-    for i in idxs:
-        if len(results) >= pool_size:
-            break
-        r = df_pool.iloc[i]
-        code = str(r.get(code_col, "")) if code_col else ""
-        desc = str(r.get(desc_col, "")) if desc_col else ""
-
-        # 璺宠繃涓庣洰鏍囧畬鍏ㄧ浉鍚岀殑鏉＄洰
-        if code and desc and code == exclude_code and desc == exclude_desc:
-            continue
-
-        sev = str(r.get(sev_col, "")).strip().upper() if sev_col else ""
-        # 闅忔満鐩镐技搴﹀垎鏁颁互椹卞姩閫夋嫨鍣ㄦ帓搴?
-        sim_score = float(rnd.random())
-
-        results.append({
-            "cve_id": str(r.get("cve_id", "")),
-            "cwe_ids": str(r.get("cwe_ids", "")),
-            "code": code,
-            "description": desc,
-            "base_score": float(r.get("Base Score", r.get("base_score", 0.0)) or 0.0),
-            "base_severity": sev,
-            "nvd_info": str(r.get("nvd_info", "")),
-            "cwe_info": str(r.get("cwe_info", "")),
-            "score": sim_score,
-        })
-
-    # 淇濇寔鎸?score 闄嶅簭
-    results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
-    return results
-
-# ================== 涓€娆¤皟鐢↙LM锛堟棤COT锛?==================
 def predict_vuln_level(query_code, query_desc, topk_samples):
-    """
-    涓€杞甃LM锛堟棤COT锛? 鏍规嵁鐩镐技婕忔礊鏍锋湰锛岀洿鎺ョ敓鎴愮洰鏍囨紡娲炵殑涓ラ噸绛夌骇
-    """
+    """Predict severity with the public No-CoT/simple prompt."""
     # Slim prompt mode: only include code, optionally truncated, to reduce payload size
     slim = os.getenv("SLIM_PROMPT", "0").strip() == "1"
     trunc_chars = 0
@@ -830,39 +489,13 @@ def predict_vuln_level(query_code, query_desc, topk_samples):
     except Exception:
         trunc_chars = 0
 
-    def _maybe_trunc(s: str) -> str:
-        if trunc_chars and len(s) > trunc_chars:
-            return s[:trunc_chars]
-        return s
-
-    prompt = ""
-    if slim:
-        prompt += "Below are a few code snippets. Infer the severity of the target code as one of: LOW, MEDIUM, HIGH, CRITICAL.\n\n"
-        for i, item in enumerate(topk_samples):
-            code_i = _maybe_trunc(str(item.get('code', '') or ''))
-            sev_i = str(item.get('base_severity', '') or '')
-            prompt += f"Sample {i + 1}:\n- Code:\n{code_i}\n- Severity: {sev_i}\n\n"
-        prompt += "Target:\n"
-        prompt += f"- Code:\n{_maybe_trunc(query_code)}\n\n"
-        prompt += "Output only one token among: LOW, MEDIUM, HIGH, CRITICAL."
-    else:
-        prompt += "Below are several similar vulnerability samples with their code, description, and corresponding severity levels. "
-        prompt += "Based on these samples, you will determine the severity of the target vulnerability example. "
-        prompt += "Please only output the severity level of the target vulnerability example without providing any explanations or severity levels of the similar samples.\n\n"
-    for i, item in enumerate(topk_samples):
-        prompt += f"Sample {i + 1}:\n"
-        prompt += f"- CVE ID: {item['cve_id']}\n"
-        prompt += f"- CWE IDs: {item['cwe_ids']}\n"
-        prompt += f"- Base Score: {item['base_score']}\n"
-        prompt += f"- Base Severity: {item['base_severity']}\n"
-        prompt += f"- Code: {item['code']}\n"
-        prompt += f"- Description: {item['description']}\n"
-        prompt += f"- NVD Info: {item['nvd_info']}\n"
-        prompt += f"- CWE Info: {item['cwe_info']}\n\n"
-        prompt += "Target Vulnerability:\n"
-        prompt += f"- Code: {query_code}\n"
-        prompt += f"- Description: {query_desc}\n\n"
-    # prompt += "Please only output the severity level (LOW, MEDIUM, HIGH, CRITICAL) of the target vulnerability example, without any explanation."
+    prompt = build_simple_prompt(
+        query_code,
+        query_desc,
+        topk_samples,
+        slim=slim,
+        trunc_chars=trunc_chars,
+    )
 
     system_content = (
         "You are an expert in code vulnerability assessment, and you will rate "
@@ -876,11 +509,11 @@ def predict_vuln_level(query_code, query_desc, topk_samples):
     ]
     return _call_llm(messages)
 
-# ================== 涓ゆ璋冪敤LLM ==================
+# ================== Experimental two-call LLM path ==================
+# Experimental two-call knowledge prompt retained for comparison only. It is
+# not invoked by scripts/rag_da_reproduce.py or by the paper-facing pipeline.
 def generate_explanatory_knowledge(query_code, query_desc, topk_samples):
-    """
-    绗竴杞?LLM锛氬厛鍒嗘瀽鐩镐技婕忔礊鏍锋湰锛屽湪缁撳悎鍒嗘瀽鐩存帴鐢熸垚鐩爣婕忔礊鐨勭粨鏋勫寲瑙ｉ噴鎬х煡璇?
-    """
+    """Generate explanatory knowledge from retrieved examples in a first LLM call."""
     prompt = "Step 1: Analyze the following 5 similar vulnerability examples. For each example, consider:\n"
     prompt += "- Functional semantics of the code\n- Vulnerability causes\n- Official severity (Base Severity) and its rationale\n"
     prompt += "- NVD/CWE descriptions for context\n- Possible fixing solutions\n\n"
@@ -918,9 +551,7 @@ def generate_explanatory_knowledge(query_code, query_desc, topk_samples):
     return explanatory_knowledge
 
 def predict_vuln_level_with_knowledge(query_code, query_desc, topk_samples):
-    """
-    绗簩杞?LLM锛氱粨鍚堢涓€杞敓鎴愮殑瑙ｉ噴鎬х煡璇嗭紝棰勬祴鐩爣婕忔礊绛夌骇
-    """
+    """Predict severity in a second LLM call using generated knowledge."""
     explanatory_knowledge = generate_explanatory_knowledge(query_code, query_desc, topk_samples)
 
     prompt = "Below is explanatory knowledge extracted from similar vulnerabilities:\n"
@@ -950,8 +581,8 @@ def predict_vuln_level_fewshot_cot(query_code, query_desc, topk_samples):
     """Few-shot chain-of-thought severity prediction (ReVul-CoT-style)."""
     prompt = "Your task is to analyze vulnerabilities step by step and finally output only the severity of the target vulnerability.\n\n"
 
-    # Step1: 鍒嗘瀽绀轰緥
-    prompt += "Step 1: Analyze the following several similar vulnerability samples. For each sample, consider:\n"
+    # Step 1: analyze the retrieved examples internally.
+    prompt += "Step 1: For each of the following similar vulnerability samples, internally construct a step-by-step explanation that considers:\n"
     prompt += "- Functional semantics of the code\n"
     prompt += "- Vulnerability causes\n"
     prompt += "- Fixing solutions\n"
@@ -973,9 +604,9 @@ def predict_vuln_level_fewshot_cot(query_code, query_desc, topk_samples):
         prompt += f"- NVD Info: {item['nvd_info']}\n"
         prompt += f"- CWE Info: {item['cwe_info']}\n\n"
 
-    # Step2: 鍒嗘瀽鐩爣婕忔礊
-    prompt += "Step 2: Based on the patterns observed in Step 1, analyze the target vulnerability.\n"
-    prompt += "Generate structured explanatory knowledge before deciding severity:\n"
+    # Step 2: analyze the target using the retrieved patterns.
+    prompt += "Step 2: Based on the patterns observed in Step 1, internally analyze the target vulnerability step by step.\n"
+    prompt += "Construct the following structured explanatory knowledge before deciding severity:\n"
     prompt += "Explanatory Knowledge:\n"
     prompt += "1. Functional Semantics: [...]\n"
     prompt += "2. Vulnerability Causes: [...]\n"
@@ -990,7 +621,7 @@ def predict_vuln_level_fewshot_cot(query_code, query_desc, topk_samples):
     prompt += f"- Code: {query_code}\n"
     prompt += f"- Description: {query_desc}\n\n"
 
-    # Step3: 杈撳嚭涓ラ噸绛夌骇锛堜繚鐣欐柊鐗堟湰鐨勬牸寮忚姹傦級
+    # Step 3: emit only the final severity label.
     prompt += "Step 3: Based on Step 1 and Step 2, output the severity level of the target vulnerability.\n"
     prompt += "Do not output any explanation, reasoning process, or the severity levels of the previous sample examples.\n"
     prompt += "Output exactly one line in the format:\n"
@@ -1010,7 +641,7 @@ def predict_vuln_level_fewshot_cot(query_code, query_desc, topk_samples):
 
 # ================== Legacy standalone runner ==================
 def predict_vuln_level_rag_llm(query_code, query_desc):
-    # 1. RAG 澶氭ā鎬佹绱?topK 鏍锋湰
+    # 1. Retrieve the top-k multimodal RAG examples.
     topk_samples = rag_multimodal_search(query_code, query_desc)
 
     # 2. COT
@@ -1018,200 +649,10 @@ def predict_vuln_level_rag_llm(query_code, query_desc):
     return level
 
 
-def predict_vuln_level_rag_llm_beam(
-    query_code: str,
-    query_desc: str,
-    true_severity: str,
-    k: int = TOPK,
-    pool_size: int = 30,
-    strategy: str = "beam",
-    beam_width: int = 8,
-    w_sim: float = 0.7,
-    w_sev: float = 0.3,
-    diversity_lambda: float = 0.1,
-) -> str:
-    """Legacy beam runner over a retrieved demonstration pool."""
-    # PING_ONLY: minimal connectivity check without building the full prompt
-    try:
-        if os.getenv("PING_ONLY", "0").strip() == "1":
-            return _call_llm([
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "Hello"},
-            ])
-    except Exception:
-        pass
-    use_no_rag = os.getenv("NO_RAG", "0").strip() == "1"
-    if use_no_rag:
-        try:
-            seed = int(os.getenv("NO_RAG_SEED", os.getenv("SHUFFLE_SEED", "42")))
-        except Exception:
-            seed = 42
-        pool = _build_no_rag_pool(query_code, query_desc, pool_size, seed)
-    else:
-        pool = rag_multimodal_search(query_code, query_desc, topk=pool_size, search_factor=int(os.getenv("RAG_SEARCH_FACTOR", "4")), return_limit=pool_size)
-    if not pool:
-        # fallback tier 1: increase search factor
-        fallback_factor = 8
-        print(f"[WARN] empty pool with topk={pool_size}, retry with search_factor={fallback_factor}")
-        if use_no_rag:
-            pool = _build_no_rag_pool(query_code, query_desc, pool_size, seed)
-        else:
-            pool = rag_multimodal_search(query_code, query_desc, topk=pool_size, search_factor=fallback_factor, return_limit=pool_size)
-    if not pool:
-        # fallback tier 2: shrink return limit
-        for limit in (20, 10, 5):
-            print(f"[WARN] still empty, retry with return_limit={limit}")
-            if use_no_rag:
-                pool = _build_no_rag_pool(query_code, query_desc, limit, seed)
-            else:
-                pool = rag_multimodal_search(query_code, query_desc, topk=limit, search_factor=fallback_factor, return_limit=limit)
-            if pool:
-                break
-    demos = pool[:k]
-    # optional debug dump of selected demos
-    try:
-        if os.getenv("DUMP_DEMOS", "0").strip() == "1":
-            print(f"[DUMP_DEMOS] strategy={strategy} k={k} pool_size={pool_size} beam_width={beam_width} w_sim={w_sim} w_sev={w_sev} div={diversity_lambda}")
-            print(f"[DUMP_DEMOS] selected_count={len(demos)}")
-            cves = []
-            for i, d in enumerate(demos):
-                cves.append(str(d.get('cve_id','')))
-                print(f"  demo[{i}] CVE={d.get('cve_id','')} sev={d.get('base_severity','')} score={d.get('score',0):.4f} cwe={d.get('cwe_ids','')}")
-            try:
-                print(f"[DUMP_DEMOS] CVE_LIST={','.join(cves)}")
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    # 鍙€夛細瀵?query / demos 鎵ц鏍囪瘑绗﹂噸鍛藉悕锛堟紨绀烘敾鍑伙級
-    try:
-        if os.getenv("APPLY_REWRITE", "0").strip() == "1":
-            target = os.getenv("REWRITE_TARGET", "demos").strip().lower()  # demos|query|both
-            max_ids = int(os.getenv("REWRITE_MAX_IDS", "3"))
-            seed = int(os.getenv("REWRITE_SEED", os.getenv("SHUFFLE_SEED", "42")))
-            if target in ("query", "both"):
-                query_code = rename_identifiers_safe(query_code, max_ids=max_ids, seed=seed)
-            if target in ("demos", "both"):
-                new_demos = []
-                for d in demos:
-                    d2 = dict(d)
-                    try:
-                        d2['code'] = rename_identifiers_safe(d2.get('code', '') or '', max_ids=max_ids, seed=seed)
-                    except Exception:
-                        pass
-                    new_demos.append(d2)
-                demos = new_demos
-            if os.getenv("DUMP_DEMOS", "0").strip() == "1":
-                print(f"[REWRITE] applied identifier renaming: target={target} max_ids={max_ids} seed={seed}")
-    except Exception as _e:
-        print(f"[REWRITE] skip due to error: {_e}")
-
-    # DRY_RUN: 璺宠繃 LLM锛屼粎杈撳嚭閫夋牱淇℃伅
-    try:
-        if os.getenv("DRY_RUN", "0").strip() == "1":
-            print("[DRY_RUN] skip LLM call; selection prepared above.")
-            return ""
-    except Exception:
-        pass
-
-    # Choose inference mode: simple vs CoT
-    try:
-        if os.getenv("INFER_SIMPLE", "0").strip() == "1":
-            level = predict_vuln_level(query_code, query_desc, demos)
-        else:
-            level = predict_vuln_level_fewshot_cot(query_code, query_desc, demos)
-    except Exception:
-        level = predict_vuln_level_fewshot_cot(query_code, query_desc, demos)
-    return level
-
-
-# ================== Legacy standalone runner ==================
+# No beam-search entry is exposed from this module. The canonical experiment
+# runner is scripts/rag_da_reproduce.py, backed by rag_da.rag_da_attack.
 if __name__ == "__main__":
-    print(
-        "[WARN] Direct execution of src/retrieval.py is legacy. "
-        "Use scripts/rag_da_reproduce.py for clean/attack runs."
+    raise SystemExit(
+        "src/retrieval.py is a library module. Use "
+        "scripts/rag_da_reproduce.py for clean or RAG-DA attack runs."
     )
-    input_file = os.getenv("INPUT_FILE", "datasets/test/test_all.xlsx")
-    output_file = os.getenv("OUTPUT_FILE", "test_all_predicted2.xlsx")
-    temp_file = os.getenv("TEMP_FILE", os.path.splitext(output_file)[0] + "_temp.xlsx")
-
-    valid_levels = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
-
-    if os.path.exists(output_file):
-        df = pd.read_excel(output_file)
-        print(f"[resume] loaded {output_file}")
-    else:
-        df = pd.read_excel(input_file)
-        df["Predicted"] = ""
-        print(f"[start] loaded {input_file}")
-
-    try:
-        globals()["CURRENT_EVAL_DF"] = df
-    except Exception:
-        pass
-
-    rows_to_predict = df[~df["Predicted"].astype(str).str.strip().isin(valid_levels)].index
-    if os.getenv("SHUFFLE_ROWS", "0").strip() == "1":
-        try:
-            import random
-
-            seed = int(os.getenv("SHUFFLE_SEED", "42"))
-            rnd = random.Random(seed)
-            rows_list = list(rows_to_predict)
-            rnd.shuffle(rows_list)
-            rows_to_predict = rows_list
-        except Exception:
-            pass
-
-    strategy = os.getenv("STRATEGY", "beam").strip().lower()
-    use_beam = strategy in ("beam", "adversarial", "baseline")
-    max_run = int(os.getenv("SMALL_RUN_MAX", "20"))
-    topk_run = int(os.getenv("TOPK", str(TOPK)))
-    pool_size = int(os.getenv("POOL_SIZE", "30"))
-    beam_width = int(os.getenv("BEAM_WIDTH", "8"))
-    w_sim = float(os.getenv("W_SIM", "0.7"))
-    w_sev = float(os.getenv("W_SEV", "0.3"))
-    diversity = float(os.getenv("DIVERSITY_LAMBDA", "0.1"))
-
-    if len(rows_to_predict) == 0:
-        print("All rows already have valid predictions.")
-    else:
-        processed = 0
-        for idx in rows_to_predict:
-            row = df.loc[idx]
-            query_code = row["func_before"]
-            query_desc = row["description"]
-
-            try:
-                if use_beam:
-                    true_sev = str(row.get("Base Severity", "")).strip().upper()
-                    level = predict_vuln_level_rag_llm_beam(
-                        query_code=query_code,
-                        query_desc=query_desc,
-                        true_severity=true_sev,
-                        k=topk_run,
-                        pool_size=pool_size,
-                        strategy=strategy,
-                        beam_width=beam_width,
-                        w_sim=w_sim,
-                        w_sev=w_sev,
-                        diversity_lambda=diversity,
-                    )
-                else:
-                    level = predict_vuln_level_rag_llm(query_code, query_desc)
-                print(f"Row {idx}: {level} (Base Severity: {row['Base Severity']})")
-            except Exception as exc:
-                print(f"Error at row {idx}: {exc}")
-                level = ""
-
-            df.at[idx, "Predicted"] = level
-            df.to_excel(temp_file, index=False)
-            os.replace(temp_file, output_file)
-
-            processed += 1
-            if processed >= max_run:
-                print(f"Reached SMALL_RUN_MAX={max_run}, stopping early.")
-                break
-
-        print(f"Predictions saved to {output_file}")

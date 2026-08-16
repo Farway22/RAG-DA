@@ -2,96 +2,118 @@
 
 ![RAG-DA Framework](framework.png)
 
-This repository contains the public code artifact for the Retrieval-Augmented
-Demonstration Attack (RAG-DA) study on software vulnerability assessment (SVA).
-RAG-DA evaluates the security of retrieval-augmented SVA pipelines by manipulating
-only the retrieved demonstrations, while keeping the user query, retriever,
-prompt template, and model parameters unchanged.
+This repository provides a reference implementation of the
+Retrieval-Augmented Demonstration Attack (RAG-DA) for software vulnerability
+assessment (SVA). RAG-DA modifies only retrieved demonstration code while
+leaving the assessed query, demonstration labels and metadata, prompt template,
+and model parameters unchanged.
 
-**Scope:** this repo is a reference implementation and in-repo checks; end-to-end
-numbers depend on external data and APIs (`docs/REPRODUCTION_SCOPE.md`).
+## Artifact scope
 
-## How to run this artifact
+This repository is not a self-contained replication package for every paper
+table. It exposes the attack logic, prompt construction, configuration
+manifest, metric code, and logic-level checks. Exact table reproduction also
+requires matched benchmark snapshots, split metadata, FAISS artifacts,
+prediction files, and model/API backends. See
+`docs/REPRODUCTION_SCOPE.md` for the precise boundary.
 
-Entry points below map to the paper’s **method and metrics**. Reported table
-values need external datasets, indexes, and APIs — see `docs/REPRODUCTION_SCOPE.md`.
+## Quick checks
 
-| Step | Command / file |
-| --- | --- |
-| Algorithm checks (no data, no API) | `python tests/test_rag_da_algorithm.py` |
-| Smoke test (no data, no API) | `python examples/rag-da-example.py` |
-| Clean / attack runs (data + API) | `python scripts/rag_da_reproduce.py` |
-| Default beam settings | `configs/vuln_beam_best.yaml` |
-| Attack core | `src/rag_da.py` |
-| Retrieval + prompting + LLM | `src/retrieval.py` |
-| Metrics | `python scripts/compute_metrics.py --predictions <attack.xlsx> --clean <clean.xlsx>` |
-
-Legacy development scripts, private dataset-prep notebooks, and internal experiment
-trees are intentionally **not** included in this public repository.
-
-## Quick Start
-
-Logic-only checks (no data, no API):
+The following checks require neither benchmark data nor API credentials:
 
 ```powershell
 python tests/test_rag_da_algorithm.py
-```
-
-Smoke test:
-
-```powershell
-uv run --python 3.12.10 python examples/rag-da-example.py
-```
-
-Or, with dependencies already installed:
-
-```powershell
 python examples/rag-da-example.py
 ```
 
-Expected behavior:
+The smoke example should print two toy demonstrations with `Edited: 1`.
 
-- `rag_da` imports successfully;
-- two toy CVE demonstrations are printed;
-- each example reports `Edited: 1`, showing that RAG-DA selected an identifier
-  rename instead of returning the original code.
+The paper-facing executable spot check first regenerates 15 pairs with the
+released canonical generator, then compiles and executes them. It requires
+MSVC Build Tools but no benchmark data or API credentials:
 
-This smoke test does not require MegaVul/BigVul data, FAISS indexes, PostgreSQL,
-or model API credentials.
+```powershell
+Push-Location artifacts/rq2_stealthiness/canonical_generator_review
+python build_canonical_generator_subset.py
+python ../executable_spotcheck/run_spotchecks.py `
+  --subset canonical_generator_pairs.jsonl `
+  --sources-dir canonical_sources `
+  --build-dir canonical_build `
+  --results-json canonical_spotcheck_results.json `
+  --results-md canonical_spotcheck_results.md
+Pop-Location
+```
 
-## Repository Map
+The frozen historical-pair audit remains available as an additional check via
+`python artifacts/rq2_stealthiness/executable_spotcheck/run_spotchecks.py`.
 
-| Purpose | File |
+## Repository map
+
+| Purpose | Path |
 | --- | --- |
-| Core RAG-DA attack module | `src/rag_da.py` |
-| Minimal runnable example | `examples/rag-da-example.py` |
-| Clean/attack runner | `scripts/rag_da_reproduce.py` |
+| Attack core | `src/rag_da.py` |
+| Retrieval, prompting, and backend calls | `src/retrieval.py` |
+| Reference clean/attack runner | `scripts/rag_da_reproduce.py` |
+| Semantic-lexicon frequency builder | `scripts/build_semantic_lexicon.py` |
 | Metric CLI | `scripts/compute_metrics.py` |
-| Retrieval, prompt construction, and LLM calls | `src/retrieval.py` |
+| Generic paired statistics and tests | `scripts/analyze_main_statistics.py` |
 | Metric primitives | `src/rag_da_metrics.py` |
-| Default beam config | `configs/vuln_beam_best.yaml` |
-| API notes | `README-rag-da.md` |
-| Run guide (data + API) | `docs/REPRODUCIBILITY.md` |
-| In-repo vs external scope | `docs/REPRODUCTION_SCOPE.md` |
+| Paper configuration manifest | `configs/vuln_beam_best.yaml` |
+| Prompt template specification | `docs/PROMPT_TEMPLATES.md` |
+| Run guide | `docs/REPRODUCIBILITY.md` |
+| Split construction and provenance | `docs/DATA_SPLITS.md` |
+| License-safe split IDs/checksums | `artifacts/split_manifests/` |
+| Public/external artifact boundary | `docs/REPRODUCTION_SCOPE.md` |
+| Expected experiment artifacts | `docs/EXPERIMENT_MANIFEST.md` |
+| Release policy | `docs/ARTIFACT_RELEASE.md` |
+| Executable paired-transformation spot checks | `artifacts/rq2_stealthiness/executable_spotcheck/` |
+| Current-generator paired compilation/behavior check | `artifacts/rq2_stealthiness/canonical_generator_review/` |
+| Frozen spot-check subset and selection audit | `artifacts/rq2_stealthiness/validation_subset_review/` |
 
-## What RAG-DA Does
+`src/rag_da.py` is the sole paper-facing beam-search and candidate-generation
+implementation used by the reference runner. `src/retrieval.py` contains only
+retrieval, prompt construction, and backend calls; it has no alternative beam
+entry and cannot rewrite the query. `src/rename_ast.py` is a compatibility
+forwarding module for older imports and does not maintain a separate
+candidate-generation algorithm.
 
-1. retrieve candidate demonstrations for a query vulnerability;
-2. localize renamable identifiers in retrieved code snippets;
-3. generate semantics-preserving identifier-renaming variants;
-4. select one variant per demonstration with variant-first beam search;
-5. send the resulting demonstration set to the same downstream SVA prompt.
+## Reference pipeline
 
-The public `src/rag_da.py` uses token-level normalized Levenshtein distance and
-supports recomputing retrieval similarity after renaming through `variant_score_fn`.
+The public runner demonstrates the following workflow:
 
-## End-to-end runs (external data required)
+1. retrieve vulnerability demonstrations with the dual-channel retriever;
+2. construct identifier-renaming variants for retrieved code;
+3. select one variant per demonstration with heuristic beam search;
+4. build the same downstream SVA prompt for clean and attacked runs;
+5. call a configured model backend and save resumable predictions;
+6. compute downgrade-oriented metrics from paired outputs.
+
+The runner loads `configs/vuln_beam_best.yaml` by default. Environment variables
+override YAML defaults, and explicit CLI arguments override both. A different
+manifest can be selected with `--config`.
+
+The public core loads both tree-sitter C and C++ grammars, selects the cleaner
+parse for each snippet, and resolves identifier uses to the nearest visible
+lexical declaration so nested shadowed bindings remain distinct. It follows
+the recorded experiment heuristic: dictionary-based identifier families;
+capped occurrence, unsafe-call, and role terms for slot
+ranking with weights `1.0/1.0/2.0`; and cumulative beam scoring over query
+similarity and average candidate-to-path diversity. Stealthiness is enforced
+primarily through constrained candidate generation, while edit-distance
+regularization remains configurable. Identifier-level randomness uses a
+stable digest combined with the configured variant seed. Candidate pools are
+deduplicated; if a snippet has fewer collision-free renamings than `variant_m`,
+the core returns the smaller set of distinct variants.
+
+## External-data run
+
+Install dependencies:
 
 ```powershell
 pip install -r requirements/requirements.txt
 ```
 
-Configure a model backend with environment variables:
+Configure an OpenAI-compatible backend, for example:
 
 ```powershell
 $env:DEEPSEEK_API_KEY = "<api key>"
@@ -99,70 +121,83 @@ $env:DEEPSEEK_BASE_URL = "https://api.example.com/v1"
 $env:DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-V3.2"
 ```
 
-MegaVul clean baseline:
+Run the reference clean and attack paths:
 
 ```powershell
 $env:INPUT_FILE = "datasets/test/test_all.xlsx"
 $env:OUTPUT_FILE = "result2/reproduce/megavul_clean.xlsx"
 python scripts/rag_da_reproduce.py --mode clean
-```
 
-RAG-DA attack:
-
-```powershell
-$env:INPUT_FILE = "datasets/test/test_all.xlsx"
 $env:OUTPUT_FILE = "result2/reproduce/megavul_attack.xlsx"
 python scripts/rag_da_reproduce.py --mode attack --recompute-variant-similarity
 ```
 
-BigVul zero-transfer:
+Then compute metrics from paired prediction files:
 
 ```powershell
-$env:INPUT_FILE = "datasets/bigvul_hf/test_subset_1208_no_overlap.xlsx"
-$env:TRAIN_FILE = "datasets/train/train_all.xlsx"
+python scripts/compute_metrics.py `
+  --predictions result2/reproduce/megavul_attack.xlsx `
+  --clean result2/reproduce/megavul_clean.xlsx
 ```
 
-More commands are documented in `docs/REPRODUCIBILITY.md`.
+For paired uncertainty estimates and statistical tests on any compatible
+prediction snapshot, use the compact format described in
+`docs/REPRODUCIBILITY.md`:
 
-## Data and Indexes
+```powershell
+python scripts/analyze_main_statistics.py `
+  --input artifacts/main_predictions.csv `
+  --output-prefix artifacts/main_statistics
+```
+
+This produces JSON, CSV, and Markdown summaries using 10,000 paired
+query-level bootstrap resamples, 100,000 paired sign-flip permutations,
+two-sided exact McNemar tests, and Holm correction across models. It does not
+require source-code payloads, prompts, rationales, or API credentials.
+
+The script does not embed or assume the manuscript's reported values. An
+optional reference-value JSON can be supplied with `--targets` when the user
+has a matched prediction snapshot and wishes to perform an explicit check.
+
+These commands require user-supplied data, indexes, and a compatible model
+backend. They do not imply that a fresh API run will reproduce every published
+digit without the matched experiment artifacts.
+
+## Expected external artifacts
 
 | Artifact | Expected path |
 | --- | --- |
 | MegaVul test split | `datasets/test/test_all.xlsx` |
 | MegaVul training split | `datasets/train/train_all.xlsx` |
-| BigVul zero-transfer split | `datasets/bigvul_hf/test_subset_1208_no_overlap.xlsx` |
+| BigVul transfer split | `datasets/bigvul_hf/test_subset_1208_no_overlap.xlsx` |
 | FAISS code index | `faiss/faiss_index_code.index` |
 | FAISS description index | `faiss/faiss_index_desc.index` |
 | FAISS row map | `faiss/id_map.json` |
 | CSV fallback knowledge base | `datasets/megavul_simple_cpp_success_getast.csv` |
 
-`src/retrieval.py` treats PostgreSQL as optional and falls back to the CSV
-knowledge base when the database is unavailable.  FAISS indexes are loaded lazily
-so the smoke test can import the module without local indexes.
+The BigVul transfer split can be rebuilt with
+`scripts/prepare_bigvul_subset.py`; the exact no-overlap rule, severity-stratum
+sampling procedure, and seed are documented in `docs/DATA_SPLITS.md`.
 
-## Model Backends
+## Model labels used in the study
 
-| Model label | Release model string |
-| --- | --- |
-| DeepSeek-V3.2 | `deepseek-ai/DeepSeek-V3.2` |
-| Qwen3-Coder | `Qwen/Qwen3-Coder-30B-A3B-Instruct` |
-| GPT-5.1 | `gpt-5.1` |
-| Grok-4.1-Fast | `x-ai/grok-4.1-fast:free` |
+| Paper label | Provider / mode | Recorded request model string |
+| --- | --- | --- |
+| DeepSeek-V3.2 | Local open-weight inference | `deepseek-ai/DeepSeek-V3.2` |
+| Qwen3-Coder | Local open-weight inference | `Qwen/Qwen3-Coder-30B-A3B-Instruct` |
+| GPT-5.1 | Official OpenAI API | `gpt-5.1` |
+| Grok-4.1-Fast | Official xAI API | `grok-4-1-fast-reasoning` |
 
-API keys are read from environment variables and must never be committed.
+The exact API base URLs and the limits of the retained provider-version record
+are documented in `docs/EXPERIMENT_MANIFEST.md`. API credentials must be
+supplied through environment variables and must not be committed.
 
-## Experiment Artifacts
+## Release status
 
-Raw datasets, FAISS indexes, full prediction workbooks, and paper figures are not
-committed to the main branch.  See `docs/EXPERIMENT_MANIFEST.md` and
-`docs/ARTIFACT_RELEASE.md` for where to place optional cached predictions
-from an external artifact bundle.
-
-## Security and Release Hygiene
-
-```powershell
-Select-String -Path (Get-ChildItem -Recurse -Include *.ps1,*.py,*.md -File).FullName -Pattern 'sk-[A-Za-z0-9_-]+'
-```
-
-Do not commit real model credentials.  Record the model string, backend
-configuration, decoding settings, and artifact paths used for each run.
+The main branch intentionally excludes third-party dataset payloads, generated
+FAISS indexes, full prompt/response traces, and large prediction workbooks.
+License-safe split identifiers and checksums are included under
+`artifacts/split_manifests/`. Subject to benchmark licenses, compact result
+summaries and the remaining audit artifacts are planned for an archival release
+upon paper acceptance. The expected paths and release categories are documented
+in `docs/EXPERIMENT_MANIFEST.md` and `docs/ARTIFACT_RELEASE.md`.

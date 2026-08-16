@@ -1,14 +1,33 @@
 name: rag-da-public-paper-aligned
 description: >
-  Public release configuration matching the paper-level RAG-DA method:
-  retrieve a larger demonstration pool, generate AST-aware identifier-renaming
-  variants, and select one variant per final demonstration with beam search.
+  Default paper-facing RAG-DA settings loaded by the public runner. Environment
+  variables and explicit CLI arguments may override these values.
+
+selection_record:
+  dataset: MegaVul validation split
+  criterion: downgrade effectiveness subject to SVR and NatScore constraints
+  exhaustive_grid_claimed: false
+  retained_beam_sensitivity: [2, 4, 8, 16]
 
 retrieval:
+  pool_size: 30
   topk: 5
   search_factor: 4
   alpha: 0.6
   beta: 0.4
+
+# These are the released runner defaults. The historical model revisions and
+# index-build metadata were not retained, so this block must not be interpreted
+# as independently proving the provenance of externally supplied FAISS files.
+embedding:
+  provenance: released_runner_defaults
+  code_encoder: microsoft/codebert-base
+  description_encoder: shibing624/text2vec-base-multilingual
+  model_revision: not_pinned
+  max_length: 256
+  pooling: first_last_avg
+  l2_normalize: true
+  faiss_index_metric: not_recorded
 
 attack:
   beam_width: 8
@@ -19,6 +38,14 @@ attack:
   diversity_lambda: 0.1
   edit_lambda: 0.0
   recompute_variant_similarity: true
+  slot_freq_weight: 1.0
+  slot_prox_weight: 1.0
+  slot_role_weight: 2.0
+  family_mode: family
+  family_lex_weight: 1.0
+  family_context_weight: 0.5
+  family_min_score: 0.5
+  allow_lexical_fallback: false
 
 prompt:
   cot: true
