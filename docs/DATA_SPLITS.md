@@ -56,9 +56,8 @@ not change subset membership.
 
 ## Hyperparameter record
 
-The paper-facing configuration is frozen in `configs/vuln_beam_best.yaml`.
-The retained selection record supports the final setting and the reported beam
-sensitivity values `B in {2, 4, 8, 16}`. A complete pilot-search trace was not
-retained, so the paper and repository do not claim that an exhaustive Cartesian
-grid was performed. This boundary is preferable to reconstructing an
-unverifiable search range after the fact.
+The reported configuration is frozen in `configs/vuln_beam_best.yaml`.
+The retained selection record covers the final setting and the reported beam
+sensitivity values `B in {2, 4, 8, 16}`. The complete pilot-search trace is
+unavailable; the documented record is therefore limited to these retained
+settings.

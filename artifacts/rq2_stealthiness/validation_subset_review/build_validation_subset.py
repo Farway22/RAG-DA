@@ -3,8 +3,8 @@
 The filter intentionally favors precision over coverage.  It keeps only pairs
 that can be represented as one collision-free, token-consistent identifier
 substitution and whose source identifier has a parameter/local declaration.
-The resulting subset is not a golden-output test for the canonical candidate
-generator. It is used for manual review and executable behavior spot checks.
+Canonical-generator conformance is tested separately. This subset supports
+manual review and executable behavior spot checks of historical pairs.
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ _split_identifier_subtokens = None
 SemanticFamily = None
 SEMANTIC_FAMILIES = None
 
-# These transformations are mechanically consistent but less natural for
-# a reviewer-facing illustration: `id -> res` disconnects the parameter from
+# These transformations are mechanically consistent but less natural in an
+# illustrative subset: `id -> res` disconnects the parameter from
 # the function's `by_id` wording, and `len -> sum` shifts the lexical cue from
 # length to accumulation.  They remain in the source artifact and are excluded
 # only from this illustrative subset.
@@ -49,10 +49,9 @@ MANUAL_SEMANTIC_EXCLUSIONS = {
 FAMILY_LEXICONS = {}
 EXACT_GENERIC_NAMES = set()
 
-# Reviewer-facing aliases are deliberately narrower than the algorithm's broad
-# families.  They retain examples whose lexical relationship is immediately
-# understandable without defending a borderline family assignment.
-REVIEWER_ALIAS_GROUPS = [
+# Interpretable aliases are deliberately narrower than the algorithm's broad
+# families and retain examples with an immediately clear lexical relationship.
+INTERPRETABLE_ALIAS_GROUPS = [
     {"len", "length", "size"},
     {"count", "counter", "cnt", "num", "number", "total"},
     {"idx", "index"},
@@ -131,7 +130,7 @@ def has_high_confidence_family_cue(name: str, family: str) -> bool:
 def shares_reviewer_alias_group(old: str, new: str) -> bool:
     old_lower = old.lower()
     new_lower = new.lower()
-    return any(old_lower in group and new_lower in group for group in REVIEWER_ALIAS_GROUPS)
+    return any(old_lower in group and new_lower in group for group in INTERPRETABLE_ALIAS_GROUPS)
 
 
 def configure_classifier(repo_src: Path) -> None:
@@ -331,10 +330,11 @@ def build_subset(source: Path, output_dir: Path, target_size: int) -> None:
             "the inputs to the companion executable spot-check suite.\n\n"
         )
         handle.write(
-            "This historical subset is independent of the paper-facing candidate "
-            "generator. It tests compilation and observed behavior of concrete "
-            "token-consistent substitutions; it is not a golden-output or reachability "
-            "test for the core-preserving templates in `src/rag_da.py`.\n\n"
+            "This historical subset evaluates compilation and observed behavior for "
+            "concrete token-consistent substitutions. Conformance of the current "
+            "candidate generator is evaluated separately in "
+            "`tests/test_rag_da_algorithm.py` and "
+            "`../canonical_generator_review/`.\n\n"
         )
         handle.write(
             "Automated exclusions cover type/class/function/member renaming, multiple "
@@ -343,12 +343,10 @@ def build_subset(source: Path, output_dir: Path, target_size: int) -> None:
             "retained pair received a preliminary visual check for consistent uses.\n\n"
         )
         handle.write(
-            "Family labels are computed directly by the released implementation's "
-            "`_assign_semantic_family()` function. All retained mappings stay within "
-            "that current code-defined family. The subset also uses each source identifier at most "
-            "once, avoiding duplicate-name/different-target ambiguity. Identifier cue "
-            "changes are lexical; they are not, by themselves, evidence of changed "
-            "runtime behavior.\n\n"
+            "The stored family labels record the historical screening run. The subset "
+            "uses each source identifier at most once, avoiding duplicate-name/different-"
+            "target ambiguity. Runtime behavior is evaluated by the paired executable "
+            "checks rather than inferred from lexical changes alone.\n\n"
         )
         handle.write(
             "To keep this illustrative subset interpretable, selection additionally "
@@ -358,12 +356,11 @@ def build_subset(source: Path, output_dir: Path, target_size: int) -> None:
             "review vocabulary.\n\n"
         )
         handle.write(
-            "A final reviewer-facing alias constraint keeps only immediately "
-            "interpretable mappings such as `result/res/ret`, `size/length/len`, "
-            "and `idx/index`; broad-family edge cases such as `error/success` are "
-            "excluded from this illustrative release subset.\n\n"
+            "The final alias screen retains immediately interpretable mappings such as "
+            "`result/res/ret`, `size/length/len`, and `idx/index`, while excluding "
+            "broad-family edge cases such as `error/success`.\n\n"
         )
-        handle.write("| ID | Source | Mapping | Family | Uses | Clean chars | Status |\n")
+        handle.write("| ID | Source | Mapping | Historical family screen | Uses | Clean chars | Status |\n")
         handle.write("|---:|---|---|---|---:|---:|---|\n")
         for review_id, item in enumerate(selected, 1):
             handle.write(

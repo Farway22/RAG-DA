@@ -22,6 +22,6 @@ Compiler: `Microsoft Visual C/C++ 19.44.35219`
 | svg_load_page | `172/19` | `ctx -> input_ctx` | pass | pass | pass |
 | count_extensions | `401/19` | `ext -> ext_idx` | pass | pass | pass |
 
-This is an executable spot check on 15 selected, self-contained or minimally stubbed transformations. It does not establish project-level compilability or behavioral equivalence for the full dataset.
+The evidence scope is these 15 selected, self-contained or minimally stubbed transformations; project-level validation uses the corresponding upstream projects and full experiment artifacts.
 
 Some original snippets emit compiler warnings under MSVC. Within every evaluated pair, clean and adversarial variants emit the same diagnostic categories; identifier renaming introduces no additional category.

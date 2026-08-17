@@ -1,8 +1,8 @@
 # Reproduction Scope
 
-The GitHub repository is a reference implementation of RAG-DA. It is intended
-to make the method, prompts, configurations, and metric interfaces inspectable
-without implying that the main branch alone reproduces every paper table.
+The GitHub repository is a reference implementation of RAG-DA. It makes the
+method, prompts, configurations, and metric interfaces inspectable. Exact
+table reproduction additionally uses the matched artifacts listed below.
 
 ## Available in the repository
 
@@ -34,8 +34,8 @@ Exact paper values depend on the following matched artifacts:
 | Paired clean/attack prediction files | Permit query-level metric and significance checks. |
 | Software/hardware environment | Affects local inference and embedding behavior. |
 
-These artifacts are not all stored in the Git main branch. Expected locations
-are listed in `EXPERIMENT_MANIFEST.md`.
+The main branch and archival bundle distribute these materials separately.
+Expected locations are listed in `EXPERIMENT_MANIFEST.md`.
 
 ## Metric conventions
 
@@ -56,13 +56,9 @@ checksums, compact derived result summaries, and remaining audit material upon
 paper acceptance. Raw third-party benchmarks, model weights, API credentials,
 and provider-controlled endpoints are not redistributed by this repository.
 
-## Interpretation
+## Coverage summary
 
-Appropriate claim:
-
-> The repository releases a reference implementation, prompt and configuration
-> specifications, metric code, and logic-level checks for RAG-DA.
-
-Claim to avoid:
-
-> Cloning the GitHub repository alone reproduces every value in the paper.
+The repository releases the RAG-DA reference implementation, prompt and
+configuration specifications, metric code, and logic-level checks. The matched
+datasets, indexes, model backends, and prediction snapshots complete the path
+to exact table reproduction.

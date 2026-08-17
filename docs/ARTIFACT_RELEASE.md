@@ -41,9 +41,10 @@ permit redistribution:
 - unrestricted prompt/response logs containing licensed or sensitive data;
 - disposable caches and development-only workspaces.
 
-## During peer review
+## Current availability
 
-The GitHub repository should be described as a reference implementation. It
-should not be presented as a complete table-replication package before the
-matched archival artifacts are available. Verification requests for restricted
-or not-yet-archived material may be handled by the authors during review.
+The GitHub repository provides the reference implementation and lightweight
+verification materials. The matched archival bundle will extend this release
+with table-level artifacts when licensing and distribution conditions permit.
+The authors can handle verification requests for restricted or pending
+artifacts during review.

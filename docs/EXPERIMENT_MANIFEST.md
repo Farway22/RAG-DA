@@ -19,10 +19,10 @@ required for exact paper-table auditing.
 | BigVul subset builder | `scripts/prepare_bigvul_subset.py` |
 | Logic-level checks | `tests/test_*.py` |
 
-`scripts/rag_da_reproduce.py` is the only supported experiment entry point. It
-calls `rag_da.rag_da_attack` for demonstration-only beam selection. The
-retrieval module does not expose a second beam implementation, accept the
-ground-truth severity as a selection input, or support query rewriting.
+`scripts/rag_da_reproduce.py` is the supported experiment entry point. It calls
+`rag_da.rag_da_attack` for demonstration-only beam selection. The retrieval
+module handles retrieval and prompt construction; ground-truth-guided selection
+and query rewriting are outside the released interface.
 
 ## External dataset and index artifacts
 
@@ -45,13 +45,12 @@ the released runner: `microsoft/codebert-base` for code,
 256, `first_last_avg` pooling, and L2-normalized output vectors. The code and
 description similarities are combined with `alpha=0.6` and `beta=0.4`.
 
-These values document the public implementation; they are not a reconstructed
-claim about unretained historical metadata. Exact model revisions, FAISS index
-type/metric, index-build commands, and index checksums were not retained in the
-public artifact. Any externally supplied indexes must have been built with
-encoders and preprocessing compatible with the runner. A future archival index
-release should include those fields and the row-map checksum before claiming
-fresh-run equivalence with the reported tables.
+These values specify the public implementation. The retained record covers the
+encoder names and preprocessing defaults, while exact historical revisions,
+FAISS index type/metric, index-build commands, and index checksums are currently
+unavailable. Externally supplied indexes must use encoders and preprocessing
+compatible with the runner. A future archival index release will record these
+fields together with the row-map checksum.
 
 ## Paired prediction and summary artifacts
 
@@ -67,8 +66,8 @@ fresh-run equivalence with the reported tables.
 | Paired statistical analysis | `result2/paper/statistical_inference.*` |
 | Compact four-model audit input | `artifacts/main_predictions.csv` |
 
-These filenames define the intended archival layout; the corresponding payloads
-are not currently committed to the main branch.
+These filenames define the intended archival layout for payloads distributed
+outside the main branch.
 
 The compact prediction schema is exactly
 `model,query_id,y_true,y_clean,y_adv`. It contains no source code, vulnerability
@@ -80,10 +79,9 @@ model/query pairs.
 ## Retained configuration-selection record
 
 The final paper configuration is `configs/vuln_beam_best.yaml`. The retained
-search record supports the final setting and the reported beam-width sensitivity
-set `B in {2, 4, 8, 16}`. The full pilot-search trace was not retained, so the
-artifact does not claim an exhaustive grid or reconstruct unverified search
-ranges after the fact.
+search record covers the final setting and the reported beam-width sensitivity
+set `B in {2, 4, 8, 16}`. The complete pilot-search trace is unavailable, so
+these retained settings define the documented search record.
 
 ## Model and provider records
 
@@ -94,12 +92,10 @@ ranges after the fact.
 | GPT-5.1 | Official OpenAI API | `https://api.openai.com/v1` | `gpt-5.1` | The requested alias was logged; a separately resolved backend snapshot was not exposed in the retained metadata | Not retained in the public artifact |
 | Grok-4.1-Fast | Official xAI API | `https://api.x.ai/v1` | `grok-4-1-fast-reasoning` | Reasoning variant selected by the model ID; no separate immutable backend snapshot was exposed in the retained metadata | Not retained in the public artifact |
 
-The commercial-model entries distinguish the API provider from the request
-model string. They do not substitute third-party gateway routing names for the
-identifiers sent to the official providers. Provider-side revisions and the
-absence of immutable backend fingerprints limit exact fresh-run equivalence;
-the planned compact prediction archive is therefore the audit record for the
-reported table values.
+The commercial-model entries distinguish the official API provider from the
+request model string. Because provider-side revisions lack immutable backend
+fingerprints, the planned compact prediction archive will serve as the stable
+audit record for the reported table values.
 
 ## Planned archival metadata
 

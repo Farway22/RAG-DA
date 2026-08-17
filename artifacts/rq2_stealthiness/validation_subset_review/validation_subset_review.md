@@ -2,15 +2,15 @@
 
 This is a 15-pair high-confidence candidate subset extracted from the existing full `full1208_ast_demos.jsonl` artifact. These pairs are the inputs to the companion executable spot-check suite.
 
-This historical subset is independent of the paper-facing candidate generator. It tests compilation and observed behavior of concrete token-consistent substitutions; it is not a golden-output or reachability test for the core-preserving templates in `src/rag_da.py`.
+This historical subset evaluates compilation and observed behavior for concrete token-consistent substitutions. Conformance of the current candidate generator is evaluated separately in `tests/test_rag_da_algorithm.py` and `../canonical_generator_review/`.
 
 Automated exclusions cover type/class/function/member renaming, multiple simultaneous mappings, destination-name collisions, unbalanced delimiters, and transformations without a detected parameter/local declaration. Each retained pair received a preliminary visual check for consistent uses.
 
-The stored family labels record the historical screening run and are not presented as output from the current canonical generator. The subset uses each source identifier at most once, avoiding duplicate-name/different-target ambiguity. Identifier cue changes are lexical; they are not, by themselves, evidence of changed runtime behavior.
+The stored family labels record the historical screening run. The subset uses each source identifier at most once, avoiding duplicate-name/different-target ambiguity. Runtime behavior is evaluated by the paired executable checks rather than inferred from lexical changes alone.
 
 Current candidate-generation conformance is tested separately in `tests/test_rag_da_algorithm.py` and `../canonical_generator_review/`, whose examples are regenerated through the canonical Snake/Camel and AST-context path.
 
-A final reviewer-facing alias constraint keeps only immediately interpretable mappings such as `result/res/ret`, `size/length/len`, and `idx/index`; broad-family edge cases such as `error/success` are excluded from this illustrative release subset.
+The final alias screen retains immediately interpretable mappings such as `result/res/ret`, `size/length/len`, and `idx/index`, while excluding broad-family edge cases such as `error/success`.
 
 | ID | Source | Mapping | Historical family screen | Uses | Clean chars | Status |
 |---:|---|---|---|---:|---:|---|

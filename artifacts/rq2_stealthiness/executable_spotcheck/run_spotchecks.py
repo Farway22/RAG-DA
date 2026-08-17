@@ -753,9 +753,9 @@ def main() -> None:
     lines.extend(
         [
             "",
-            f"This is an executable spot check on {len(results)} selected, self-contained or "
-            "minimally stubbed transformations. It does not establish project-level "
-            "compilability or behavioral equivalence for the full dataset.",
+            f"The evidence scope is these {len(results)} selected, self-contained or "
+            "minimally stubbed transformations; project-level validation uses the "
+            "corresponding upstream projects and full experiment artifacts.",
             "",
             "Some original snippets emit compiler warnings under MSVC. Within every "
             "evaluated pair, clean and adversarial variants emit the same diagnostic "

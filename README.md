@@ -10,11 +10,10 @@ and model parameters unchanged.
 
 ## Artifact scope
 
-This repository is not a self-contained replication package for every paper
-table. It exposes the attack logic, prompt construction, configuration
-manifest, metric code, and logic-level checks. Exact table reproduction also
-requires matched benchmark snapshots, split metadata, FAISS artifacts,
-prediction files, and model/API backends. See
+The repository includes the attack logic, prompt construction, configuration
+manifest, metric code, and logic-level checks. Reproducing the exact paper
+tables additionally requires matched benchmark snapshots, split metadata,
+FAISS artifacts, prediction files, and model/API backends. See
 `docs/REPRODUCTION_SCOPE.md` for the precise boundary.
 
 ## Quick checks
@@ -28,7 +27,7 @@ python examples/rag-da-example.py
 
 The smoke example should print two toy demonstrations with `Edited: 1`.
 
-The paper-facing executable spot check first regenerates 15 pairs with the
+The executable spot check first regenerates 15 pairs with the
 released canonical generator, then compiles and executes them. It requires
 MSVC Build Tools but no benchmark data or API credentials:
 
@@ -44,7 +43,7 @@ python ../executable_spotcheck/run_spotchecks.py `
 Pop-Location
 ```
 
-The frozen historical-pair audit remains available as an additional check via
+An additional audit of the frozen historical pairs is available via
 `python artifacts/rq2_stealthiness/executable_spotcheck/run_spotchecks.py`.
 
 ## Repository map
@@ -70,12 +69,11 @@ The frozen historical-pair audit remains available as an additional check via
 | Current-generator paired compilation/behavior check | `artifacts/rq2_stealthiness/canonical_generator_review/` |
 | Frozen spot-check subset and selection audit | `artifacts/rq2_stealthiness/validation_subset_review/` |
 
-`src/rag_da.py` is the sole paper-facing beam-search and candidate-generation
-implementation used by the reference runner. `src/retrieval.py` contains only
-retrieval, prompt construction, and backend calls; it has no alternative beam
-entry and cannot rewrite the query. `src/rename_ast.py` is a compatibility
-forwarding module for older imports and does not maintain a separate
-candidate-generation algorithm.
+`src/rag_da.py` provides the canonical beam-search and candidate-generation
+implementation used by the reference runner. `src/retrieval.py` handles
+retrieval, prompt construction, and backend calls, while query rewriting is
+outside its interface. `src/rename_ast.py` forwards older imports to the
+canonical candidate generator.
 
 ## Reference pipeline
 
@@ -152,16 +150,17 @@ python scripts/analyze_main_statistics.py `
 
 This produces JSON, CSV, and Markdown summaries using 10,000 paired
 query-level bootstrap resamples, 100,000 paired sign-flip permutations,
-two-sided exact McNemar tests, and Holm correction across models. It does not
-require source-code payloads, prompts, rationales, or API credentials.
+two-sided exact McNemar tests, and Holm correction across models. The analysis
+uses compact paired prediction records rather than source-code payloads,
+prompts, rationales, or API credentials.
 
-The script does not embed or assume the manuscript's reported values. An
-optional reference-value JSON can be supplied with `--targets` when the user
-has a matched prediction snapshot and wishes to perform an explicit check.
+Reported values remain external to the script. An optional reference-value
+JSON can be supplied with `--targets` for an explicit check against a matched
+prediction snapshot.
 
-These commands require user-supplied data, indexes, and a compatible model
-backend. They do not imply that a fresh API run will reproduce every published
-digit without the matched experiment artifacts.
+These commands use user-supplied data, indexes, and a compatible model backend.
+Digit-level comparison with the paper requires the matched experiment
+artifacts.
 
 ## Expected external artifacts
 
@@ -194,10 +193,10 @@ supplied through environment variables and must not be committed.
 
 ## Release status
 
-The main branch intentionally excludes third-party dataset payloads, generated
-FAISS indexes, full prompt/response traces, and large prediction workbooks.
-License-safe split identifiers and checksums are included under
-`artifacts/split_manifests/`. Subject to benchmark licenses, compact result
+The main branch contains license-safe split identifiers and checksums under
+`artifacts/split_manifests/`. Third-party dataset payloads, generated FAISS
+indexes, full prompt/response traces, and large prediction workbooks are
+managed as external artifacts. Subject to benchmark licenses, compact result
 summaries and the remaining audit artifacts are planned for an archival release
 upon paper acceptance. The expected paths and release categories are documented
 in `docs/EXPERIMENT_MANIFEST.md` and `docs/ARTIFACT_RELEASE.md`.

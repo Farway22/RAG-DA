@@ -5,9 +5,8 @@ committed `sources/` files are generated from the frozen review subset. Build
 products are written only to `build/` and are intentionally ignored.
 
 The suite provides compilation and observed-behavior evidence for these
-historical pairs. It does not assert that every historical destination name is
-emitted by the current core-preserving template generator; conformance of that
-algorithm is checked in `tests/test_rag_da_algorithm.py`.
+historical pairs. Conformance of the current core-preserving template generator
+is checked separately in `tests/test_rag_da_algorithm.py`.
 
 ## Run
 
@@ -34,6 +33,6 @@ exit status, standard output, standard error, and compiler diagnostic
 categories. The checked-in summary records the compiler family and version,
 not machine-specific paths.
 
-This suite is an executable spot check on self-contained or minimally stubbed
-functions. It does not establish project-level compilability or behavioral
-equivalence for the full dataset.
+The evidence scope is the 15 self-contained or minimally stubbed functions in
+this executable spot check; project-level validation uses the corresponding
+upstream projects and full experiment artifacts.

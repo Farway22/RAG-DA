@@ -114,7 +114,7 @@ run time.
 Both `tree-sitter-c` and `tree-sitter-cpp` are installed by the requirements
 manifest. The attack parses each snippet with the available C and C++ grammars,
 keeps an error-free parse, and resolves uses to the nearest visible lexical
-declaration before applying a rename. The paper-facing configuration sets
+declaration before applying a rename. The reported configuration sets
 `allow_lexical_fallback: false`: if neither grammar yields an error-free tree,
 the candidate is left unchanged. The runner exposes `--allow-lexical-fallback`
 only for explicit smoke-test use.
